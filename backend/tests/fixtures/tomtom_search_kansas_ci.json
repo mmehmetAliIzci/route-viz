@@ -1,0 +1,149 @@
+{
+ "results": [
+  {
+   "address": {
+    "municipality": "Kansas City",
+    "countrySubdivision": "MO",
+    "countrySubdivisionName": "Missouri",
+    "countrySubdivisionCode": "MO",
+    "countryCode": "US",
+    "country": "United States",
+    "countryCodeISO3": "USA",
+    "freeformAddress": "Kansas City, MO"
+   },
+   "position": {
+    "lat": 39.099792,
+    "lon": -94.578559
+   }
+  },
+  {
+   "address": {
+    "municipality": "Kansas City",
+    "countrySecondarySubdivision": "Wyandotte",
+    "countrySubdivision": "KS",
+    "countrySubdivisionName": "Kansas",
+    "countrySubdivisionCode": "KS",
+    "countryCode": "US",
+    "country": "United States",
+    "countryCodeISO3": "USA",
+    "freeformAddress": "Kansas City, KS"
+   },
+   "position": {
+    "lat": 39.1127,
+    "lon": -94.626804
+   }
+  },
+  {
+   "address": {
+    "municipality": "North Kansas City",
+    "countrySecondarySubdivision": "Clay",
+    "countrySubdivision": "MO",
+    "countrySubdivisionName": "Missouri",
+    "countrySubdivisionCode": "MO",
+    "countryCode": "US",
+    "country": "United States",
+    "countryCodeISO3": "USA",
+    "freeformAddress": "North Kansas City, MO"
+   },
+   "position": {
+    "lat": 39.141964,
+    "lon": -94.577267
+   }
+  },
+  {
+   "poi": {
+    "name": "FIFA Fan Festival National World War I Museum & Memorial",
+    "categorySet": [
+     {
+      "id": 7315146
+     }
+    ],
+    "categories": [
+     "banquet rooms",
+     "restaurant"
+    ],
+    "classifications": [
+     {
+      "code": "RESTAURANT",
+      "names": [
+       {
+        "nameLocale": "en-US",
+        "name": "restaurant"
+       },
+       {
+        "nameLocale": "en-US",
+        "name": "banquet rooms"
+       }
+      ]
+     }
+    ]
+   },
+   "address": {
+    "streetNumber": "2",
+    "streetName": "Memorial Drive",
+    "municipality": "Kansas City",
+    "countrySecondarySubdivision": "Jackson",
+    "countrySubdivision": "MO",
+    "countrySubdivisionName": "Missouri",
+    "countrySubdivisionCode": "MO",
+    "postalCode": "64108",
+    "countryCode": "US",
+    "country": "United States",
+    "countryCodeISO3": "USA",
+    "freeformAddress": "2 Memorial Drive, Kansas City, MO 64108",
+    "localName": "Kansas City"
+   },
+   "position": {
+    "lat": 39.08028,
+    "lon": -94.58611
+   }
+  },
+  {
+   "poi": {
+    "name": "Kansas City Museum",
+    "phone": "+1 816-483-8300",
+    "categorySet": [
+     {
+      "id": 7376
+     }
+    ],
+    "url": "kansascitymuseum.org",
+    "categories": [
+     "important tourist attraction"
+    ],
+    "classifications": [
+     {
+      "code": "IMPORTANT_TOURIST_ATTRACTION",
+      "names": [
+       {
+        "nameLocale": "en-US",
+        "name": "important tourist attraction"
+       }
+      ]
+     }
+    ]
+   },
+   "address": {
+    "streetNumber": "3218",
+    "streetName": "Gladstone Boulevard",
+    "municipality": "Kansas City",
+    "neighbourhood": "Scarritt Point",
+    "countrySecondarySubdivision": "Jackson",
+    "countrySubdivision": "MO",
+    "countrySubdivisionName": "Missouri",
+    "countrySubdivisionCode": "MO",
+    "postalCode": "64123",
+    "extendedPostalCode": "64123-1111",
+    "countryCode": "US",
+    "country": "United States",
+    "countryCodeISO3": "USA",
+    "freeformAddress": "3218 Gladstone Boulevard, Kansas City, MO 64123",
+    "localName": "Kansas City"
+   },
+   "position": {
+    "lat": 39.115988,
+    "lon": -94.542413
+   }
+  }
+ ]
+}

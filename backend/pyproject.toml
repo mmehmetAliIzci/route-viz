@@ -1,0 +1,32 @@
+[project]
+name = "route-viz-backend"
+version = "0.1.0"
+description = "Weather-aware truck route planner API"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.1.2",
+    "djangorestframework>=3.18.3",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+    "sentry-sdk[django]>=2.72.0",
+    "timezonefinder>=9.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.0",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+exclude = ["manage.py", "config/asgi.py", "config/wsgi.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

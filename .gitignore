@@ -1,0 +1,33 @@
+*.pyc
+*.sqlite3
+.DS_Store
+.env
+.env.*
+!.env.example
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+data/cache/
+dist/
+frontend/.vite/
+frontend/playwright-report/
+frontend/test-results/
+node_modules/
+
+# The user's global gitignore ignores Makefile; this repository's are tracked.
+!Makefile
+
+# Screenshots never go into the repository (user rule). Un-ignore a real app asset by path if one is ever needed.
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+screenshots/
+
+# Local visual docs (visualize-repo)
+.agent-native/
+agent-native.json
+.claude/
