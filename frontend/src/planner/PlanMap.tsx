@@ -1,6 +1,9 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { useMemo } from 'react'
 import { DEFAULT_FIT_PADDING, useMapLibre, type FitPadding, type HeatmapDisplay } from './map/useMapLibre'
+import { useWindParticles, type WindDisplay } from './map/useWindParticles'
 import type { PlanView } from './model/planView'
+import { useResolvedTheme } from '../theme/theme'
 
 type Props = {
   plan: PlanView | null
@@ -10,8 +13,21 @@ type Props = {
   fitPadding?: FitPadding // space the routes keep clear of, for panels that cover the map
 }
 
-// One MapLibre map for the session. The lifecycle lives in useMapLibre.
+// One MapLibre map for the session. The lifecycle lives in useMapLibre; the wind particles
+// are a canvas over the map, shown with the Wind layer when the plan has wind direction.
 export function PlanMap({ plan, selectedId, onSelectRoute, heatmap, fitPadding = DEFAULT_FIT_PADDING }: Props) {
-  const container = useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding })
-  return <div ref={container} className="h-full w-full" role="region" aria-label="Map of routes and checkpoints" />
+  const theme = useResolvedTheme()
+  const { container, map } = useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding, theme })
+  const wind = useMemo<WindDisplay | null>(
+    () =>
+      heatmap?.kind === 'wind' && heatmap.field.windVectors ? { field: heatmap.field, hour: heatmap.hour } : null,
+    [heatmap],
+  )
+  const particles = useWindParticles(map, wind, theme)
+  return (
+    <div className="relative h-full w-full">
+      <div ref={container} className="h-full w-full" role="region" aria-label="Map of routes and checkpoints" />
+      <canvas ref={particles} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
+    </div>
+  )
 }

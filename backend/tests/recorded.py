@@ -1,6 +1,7 @@
 """The recorded Kansas City to Denver trip, built into a plan without any network."""
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 import pytest
 
 from planner import http, plan
+from planner.demo import Scenario
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -22,13 +24,27 @@ def kc_den_trip(tomtom: dict) -> plan.Trip:
     )
 
 
-def build_kc_den(viewer_tz: str = "UTC") -> dict[str, Any]:
+def build_kc_den(
+    viewer_tz: str = "UTC",
+    demo: Scenario | None = None,
+    patch_hourly: Callable[[dict], None] | None = None,
+) -> dict[str, Any]:
+    """With `demo`, any Open-Meteo call fails the build: demo weather must not fetch.
+
+    `patch_hourly` may change each location's recorded `hourly` block before it is parsed.
+    """
     tomtom = json.loads((FIX / "tomtom_route_kc_den.json").read_text())
     grid = json.loads((FIX / "open_meteo_kc_den_grid.json").read_text())
+    for location in grid if patch_hourly else []:
+        patch_hourly(location["hourly"])
 
     def fake_get(provider: str, url: str, params: dict, deadline: object = None) -> object:
-        return tomtom if provider == "tomtom" else grid
+        if provider == "tomtom":
+            return tomtom
+        if demo is not None:
+            raise AssertionError(f"demo plan called {provider}")
+        return grid
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(http, "get_json", fake_get)
-        return plan.build(kc_den_trip(tomtom), api_key="unused", viewer_tz=viewer_tz)
+        return plan.build(kc_den_trip(tomtom), api_key="unused", viewer_tz=viewer_tz, demo=demo)

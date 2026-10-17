@@ -1,6 +1,6 @@
 import fixture from '../../test/plan-kc-den.json'
 import { parsePlan } from '../../api/planApi'
-import { LEVELS, buildPlanView, formatClock, formatDuration, formatTime, hourLabel, vsRecommendedLabel } from './planView'
+import { LEVELS, buildPlanView, compassPoint, formatClock, formatDuration, formatTime, hourLabel, vsRecommendedLabel } from './planView'
 
 const plan = parsePlan(fixture)
 
@@ -186,5 +186,41 @@ describe('saved trips', () => {
     const saved = parsePlan({ ...fixture, sample: { id: 'x', label: 'A to B', recorded_utc: '2026-10-15T04:30:00Z' } })
     expect(buildPlanView(saved).savedLabel).toBe('Saved trip, recorded Wed, Oct 14')
     expect(buildPlanView(plan).savedLabel).toBeNull()
+  })
+})
+
+describe('demo weather', () => {
+  it('says the weather is synthetic, and leaves a real forecast alone', () => {
+    const demo = buildPlanView({ ...plan, demo: 'wind' })
+    expect(demo.demo).toBe('wind')
+    expect(demo.forecastLabel).toBe('Demo weather: a synthetic wind storm sweeping the corridor (not a forecast)')
+    expect(buildPlanView({ ...plan, demo: 'snow' }).forecastLabel).toContain('synthetic snow storm')
+    const real = buildPlanView(plan)
+    expect(real.demo).toBeNull()
+    expect(real.forecastLabel).toMatch(/^ICON forecast/)
+  })
+})
+
+describe('compassPoint', () => {
+  it('names the nearest of eight points', () => {
+    const cases: [number, string][] = [[0, 'N'], [22, 'N'], [23, 'NE'], [90, 'E'], [180, 'S'], [225, 'SW'], [337, 'NW'], [338, 'N'], [359, 'N']]
+    for (const [deg, name] of cases) expect(compassPoint(deg)).toBe(name)
+  })
+})
+
+describe('checkpoint weather label', () => {
+  const first = plan.routes[0]!.checkpoints[0]!
+  const withCheckpoint = (c: typeof first) =>
+    buildPlanView({ ...plan, routes: plan.routes.map((r, i) => (i === 0 ? { ...r, checkpoints: [c] } : r)) })
+      .routes[0]!.checkpoints[0]!.weatherLabel
+
+  it('names the wind direction when the plan has one', () => {
+    const label = withCheckpoint({ ...first, wind_mph: 22.4, gust_mph: 30.2, wind_dir_deg: 225 })
+    expect(label).toMatch(/^Wind 22 mph from SW \(gusts 30\) · Rain /)
+  })
+
+  it('leaves the direction out for an older plan without it', () => {
+    const label = withCheckpoint({ ...first, wind_mph: 22.4, gust_mph: 30.2, wind_dir_deg: undefined })
+    expect(label).toMatch(/^Wind 22 mph \(gusts 30\) · Rain /)
   })
 })

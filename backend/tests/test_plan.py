@@ -96,3 +96,69 @@ def test_text_uses_the_viewer_zone_not_the_origin_zone(monkeypatch: pytest.Monke
 def test_checkpoint_etas_count_from_the_exact_departure(kc_den: dict) -> None:
     # The router gets the departure floored to 15 minutes; ETAs must not.
     assert kc_den["routes"][0]["checkpoints"][0]["eta_utc"] == kc_den["trip"]["departure_utc"]
+
+
+def test_a_forecast_without_direction_sends_no_direction(kc_den: dict) -> None:
+    def strip(hourly: dict) -> None:
+        hourly.pop("wind_direction_10m", None)
+
+    body = build_kc_den(patch_hourly=strip)
+    assert "demo" not in body and "demo" not in kc_den
+    assert body["weather"]["model"] == "icon_seamless"
+    assert all("wind_dir_deg" not in c for r in body["routes"] for c in r["checkpoints"])
+    assert set(body["heatmap"]["channels"]) == {"risk", "wind", "rain", "snow"}
+
+
+def test_a_forecast_with_direction_sends_it_on_checkpoints_and_heatmap() -> None:
+    def from_west(hourly: dict) -> None:
+        hourly["wind_direction_10m"] = [268.0] * len(hourly["time"])
+
+    body = build_kc_den(patch_hourly=from_west)
+    assert {c["wind_dir_deg"] for r in body["routes"] for c in r["checkpoints"]} == {268}
+    h = body["heatmap"]
+    ch = h["channels"]["wind_dir"]
+    assert ch["scale"] == 2.0
+    mask = base64.b64decode(h["mask"])
+    data = base64.b64decode(ch["data"])
+    assert len(data) == h["hours"] * h["ny"] * h["nx"]
+    assert {b for k, b in enumerate(data) if mask[k % len(mask)]} == {134}
+    assert {b for k, b in enumerate(data) if not mask[k % len(mask)]} == {0}
+
+
+@pytest.fixture(scope="module")
+def kc_den_wind() -> dict:
+    return build_kc_den(demo="wind")
+
+
+def test_demo_plan_uses_synthetic_weather_without_open_meteo(kc_den: dict, kc_den_wind: dict) -> None:
+    assert kc_den_wind["demo"] == "wind"
+    assert kc_den_wind["weather"] == {
+        "model": "demo",
+        "source": "Demo weather (synthetic, not a forecast)",
+        "grid_step_deg": kc_den["weather"]["grid_step_deg"],
+        "locations": kc_den["weather"]["locations"],
+    }
+    assert kc_den_wind["heatmap"]["mask"] == kc_den["heatmap"]["mask"]  # the same lean layout
+    assert [r["geometry"] for r in kc_den_wind["routes"]] == [r["geometry"] for r in kc_den["routes"]]
+    levels = [c["level"] for r in kc_den_wind["routes"] for c in r["checkpoints"]]
+    assert any(lv != "low" for lv in levels)
+
+
+def test_demo_plan_has_wind_direction(kc_den_wind: dict) -> None:
+    h = kc_den_wind["heatmap"]
+    ch = h["channels"]["wind_dir"]
+    assert ch["scale"] == 2.0
+    data = base64.b64decode(ch["data"])
+    assert len(data) == h["hours"] * h["ny"] * h["nx"]
+    mask = base64.b64decode(h["mask"])
+    on = [b for k, b in enumerate(data) if mask[k % (h["nx"] * h["ny"])]]
+    assert all(90 <= b <= 135 for b in on)  # 180 to 270 degrees, around south-west
+    for r in kc_den_wind["routes"]:
+        for c in r["checkpoints"]:
+            assert isinstance(c["wind_dir_deg"], int) and 0 <= c["wind_dir_deg"] <= 359
+
+
+def test_demo_recommendation_matches_the_summaries(kc_den_wind: dict) -> None:
+    test_recommendation_matches_the_summaries(kc_den_wind)
+    test_recommendation_is_explained(kc_den_wind)
+    test_summary_miles_never_exceed_the_route(kc_den_wind)

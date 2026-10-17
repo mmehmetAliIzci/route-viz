@@ -130,3 +130,81 @@ def test_series_are_cached_by_request_and_deadline_is_passed_on(monkeypatch: pyt
     assert seen == [deadline]
     weather.fetch_series(where, T0 + timedelta(hours=2), T0 + timedelta(hours=3), deadline)
     assert len(seen) == 2
+
+
+def hourly_body(direction: list[float] | None) -> dict:
+    hourly = {
+        "time": [0, 3600],
+        "wind_speed_10m": [20, 20],
+        "wind_gusts_10m": [30, 30],
+        "rain": [0, 0],
+        "showers": [0, 0],
+        "snowfall": [0, 0],
+    }
+    if direction is not None:
+        hourly["wind_direction_10m"] = direction
+    return {"hourly": hourly}
+
+
+def test_direction_is_requested_and_parsed() -> None:
+    assert "wind_direction_10m" in weather.VARIABLES
+    [s] = weather.parse([hourly_body([350, 10])])
+    assert s.dir_deg == [350, 10]
+    w = s.at(datetime.fromtimestamp(1800, UTC))
+    assert w.dir_deg == pytest.approx(0, abs=1e-6) or w.dir_deg == pytest.approx(360)
+
+
+def test_a_forecast_without_direction_parses_with_none() -> None:
+    [s] = weather.parse([hourly_body(None)])
+    assert s.dir_deg is None
+    assert s.at(datetime.fromtimestamp(1800, UTC)).dir_deg is None
+    [nulls] = weather.parse([hourly_body([None, 10])])
+    assert nulls.dir_deg is None
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [(350, 10, 0), (10, 350, 0), (90, 180, 135), (270, 0, 315), (200, 200, 200)],
+)
+def test_direction_is_averaged_round_the_circle(a: float, b: float, expected: float) -> None:
+    got = weather.mean_direction([(a, 10, 0.5), (b, 10, 0.5)])
+    assert min(abs(got - expected), 360 - abs(got - expected)) < 1e-6
+
+
+def test_direction_leans_to_the_stronger_wind() -> None:
+    # 90 at 30 mph and 180 at 10 mph: the vector mean sits nearer east than the 135 midpoint
+    assert weather.mean_direction([(90, 30, 0.5), (180, 10, 0.5)]) < 120
+
+
+def test_calm_winds_still_have_a_direction() -> None:
+    assert weather.mean_direction([(350, 0, 0.5), (10, 0, 0.5)]) == pytest.approx(0, abs=1e-6)
+
+
+def directed(dirs: list[float]) -> Series:
+    return Series(
+        t0=int(T0.timestamp()),
+        wind_mph=[10.0] * len(dirs),
+        gust_mph=[10.0] * len(dirs),
+        rain_in_hr=[0.0] * len(dirs),
+        snow_in_hr=[0.0] * len(dirs),
+        dir_deg=dirs,
+    )
+
+
+def test_direction_is_interpolated_in_time_through_north() -> None:
+    s = directed([350, 10])
+    got = s.at(T0 + timedelta(minutes=30)).dir_deg
+    assert min(got, 360 - got) < 1e-6
+    assert s.at(T0 + timedelta(minutes=15)).dir_deg == pytest.approx(355, abs=0.1)
+
+
+def test_grid_direction_is_bilinear_through_north_and_none_when_a_corner_lacks_it() -> None:
+    nodes = {0: directed([350, 350]), 1: directed([10, 10]), 2: directed([350, 350]), 3: directed([10, 10])}
+    g = weather.Grid(west=0, south=0, step=1, nx=2, ny=2, start=T0, series=nodes)
+    got = g.at(0.5, 0.5, T0).dir_deg
+    assert min(got, 360 - got) < 1e-6
+    assert g.has_direction
+    nodes[3] = series([10, 10], [0, 0])
+    g = weather.Grid(west=0, south=0, step=1, nx=2, ny=2, start=T0, series=nodes)
+    assert g.at(0.5, 0.5, T0).dir_deg is None
+    assert not g.has_direction

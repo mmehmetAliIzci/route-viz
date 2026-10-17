@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from planner import explain, ranking, sampling
+from planner import demo, explain, plan, ranking, sampling, weather
 from planner.rules import Level
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "data" / "samples"
@@ -77,3 +77,50 @@ def in_zone(body: dict[str, Any], tz_name: str | None) -> dict[str, Any]:
     out = refresh(deepcopy(body), explain.zone(name))
     out["trip"]["viewer_tz"] = name
     return out
+
+
+def with_demo(body: dict[str, Any], scenario: demo.Scenario, tz_name: str | None = None) -> dict[str, Any]:
+    """A copy of a saved plan rescored against demo weather, explained in `tz_name` (origin's when None).
+
+    Routes, geometry and checkpoint positions and ETAs stay as stored; levels, summaries,
+    recommendation, weather and heatmap come from the synthetic front. Sets trip.viewer_tz
+    and demo. Raises ValueError for an unknown zone or scenario.
+    """
+    if scenario not in demo.SCENARIOS:
+        raise ValueError(f"unknown demo scenario: {scenario}")
+    name = tz_name or body["trip"]["origin_tz"]
+    explain.zone(name)
+    t = body["trip"]
+    departure = datetime.fromisoformat(t["departure_utc"])
+    trip = plan.Trip(
+        origin=plan.Place(**t["origin"]),
+        destination=plan.Place(**t["destination"]),
+        departure=departure,
+        load_lb=t["load_lb"],
+        spacing_mi=t["spacing_mi"],
+    )
+    shapes = [_shape(route) for route in body["routes"]]
+    lay = weather.layout([s.geometry for s in shapes])
+    grid = demo.grid(lay, departure, plan.HEATMAP_HOURS, scenario)
+    out = deepcopy(body)
+    out.update(plan.score(trip, shapes, grid, name, scenario))
+    out["trip"]["viewer_tz"] = name
+    out["demo"] = scenario
+    return out
+
+
+def _shape(route: dict[str, Any]) -> plan.RouteShape:
+    cps = route["checkpoints"]
+    owned = sampling.owned_miles([c["mile"] for c in cps])
+    return plan.RouteShape(
+        index=route["id"],
+        name=route["name"],
+        distance_mi=route["distance_mi"],
+        duration_s=route["duration_s"],
+        arrival=datetime.fromisoformat(route["arrival_utc"]),
+        geometry=[(lon, lat) for lon, lat in route["geometry"]],
+        checkpoints=[
+            sampling.Checkpoint(c["mile"], c["lon"], c["lat"], datetime.fromisoformat(c["eta_utc"]), mi)
+            for c, mi in zip(cps, owned, strict=True)
+        ],
+    )

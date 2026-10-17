@@ -1,12 +1,12 @@
 import type { Plan } from '../../api/planApi'
-import { colorAt, decodeHeatmap, LEGENDS, paintHour } from './heatmap'
+import { colorAt, decodeHeatmap, LEGENDS, paintHour, sampleWind } from './heatmap'
 
 const WIND_STOPS = LEGENDS.wind.stops
 
 const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes))
 
 // 2 x 2 nodes, 2 hours. Rows run south to north.
-function sample(wind: number[], mask = [1, 1, 1, 1]): Plan['heatmap'] {
+function sample(wind: number[], mask = [1, 1, 1, 1], windDir?: number[]): Plan['heatmap'] {
   const zeros = b64(new Array(8).fill(0))
   return {
     west: -100,
@@ -23,6 +23,7 @@ function sample(wind: number[], mask = [1, 1, 1, 1]): Plan['heatmap'] {
       wind: { scale: 0.5, data: b64(wind) },
       rain: { scale: 0.005, data: zeros },
       snow: { scale: 0.02, data: zeros },
+      ...(windDir ? { wind_dir: { scale: 2, data: b64(windDir) } } : {}),
     },
   }
 }
@@ -90,5 +91,68 @@ describe('colorAt', () => {
     expect(colorAt(ramp, 5)).toEqual([50, 100, 25, 128])
     expect(colorAt(ramp, -3)).toEqual([0, 0, 0, 0])
     expect(colorAt(ramp, 40)).toEqual([100, 200, 50, 255])
+  })
+})
+
+describe('wind direction', () => {
+  // wind_dir bytes are degrees the wind blows FROM, halved
+  const blowingFrom = (deg: number) => new Array(8).fill(deg / 2)
+  const speed20 = new Array(8).fill(40) // 20 mph at scale 0.5
+
+  it('leaves windVectors null when the plan has no wind direction', () => {
+    const field = decodeHeatmap(sample(speed20))
+    expect(field.windVectors).toBeNull()
+    expect(sampleWind(field, 0, -99.75, 38.25)).toBeNull()
+  })
+
+  it('keeps the node grid so samplers can find nodes', () => {
+    const field = decodeHeatmap(sample(speed20))
+    expect([field.west, field.south, field.stepDeg]).toEqual([-100, 38, 0.5])
+  })
+
+  it.each([
+    { from: 0, u: 0, v: -20 }, // northerly blows south
+    { from: 90, u: -20, v: 0 }, // easterly blows west
+    { from: 180, u: 0, v: 20 }, // southerly blows north
+    { from: 270, u: 20, v: 0 }, // westerly blows east
+  ])('turns a wind from $from degrees into the vector it blows along', ({ from, u, v }) => {
+    const field = decodeHeatmap(sample(speed20, [1, 1, 1, 1], blowingFrom(from)))
+    expect(field.windVectors?.u[0]).toBeCloseTo(u, 4)
+    expect(field.windVectors?.v[0]).toBeCloseTo(v, 4)
+  })
+
+  it('sends a south-westerly toward the north-east', () => {
+    const field = decodeHeatmap(sample(speed20, [1, 1, 1, 1], blowingFrom(224)))
+    expect(field.windVectors?.u[0]).toBeGreaterThan(0)
+    expect(field.windVectors?.v[0]).toBeGreaterThan(0)
+  })
+})
+
+describe('sampleWind', () => {
+  // southerlies everywhere; hour 0: south row 10 and 20 mph, north row 30 and 40; hour 1 calm
+  const field = decodeHeatmap(sample([20, 40, 60, 80, 0, 0, 0, 0], [1, 1, 1, 1], new Array(8).fill(90)))
+
+  it('reads a node exactly', () => {
+    expect(sampleWind(field, 0, -100, 38)?.v).toBeCloseTo(10, 4)
+    expect(sampleWind(field, 0, -99.5, 38.5)?.v).toBeCloseTo(40, 4)
+  })
+
+  it('interpolates between nodes and between hours', () => {
+    expect(sampleWind(field, 0, -99.875, 38)?.v).toBeCloseTo(12.5, 4) // a quarter of the way east
+    const centre = sampleWind(field, 0, -99.75, 38.25)
+    expect(centre?.v).toBeCloseTo(25, 4)
+    expect(centre?.u).toBeCloseTo(0, 4)
+    expect(sampleWind(field, 0.5, -99.75, 38.25)?.v).toBeCloseTo(12.5, 4)
+  })
+
+  it('is null off the grid', () => {
+    expect(sampleWind(field, 0, -100.01, 38.25)).toBeNull()
+    expect(sampleWind(field, 0, -99.75, 38.51)).toBeNull()
+    expect(sampleWind(field, 0, Number.NaN, 38.25)).toBeNull()
+  })
+
+  it('is null when any surrounding node has no forecast', () => {
+    const gap = decodeHeatmap(sample([20, 40, 60, 80, 0, 0, 0, 0], [1, 1, 1, 0], new Array(8).fill(90)))
+    expect(sampleWind(gap, 0, -100, 38)).toBeNull()
   })
 })

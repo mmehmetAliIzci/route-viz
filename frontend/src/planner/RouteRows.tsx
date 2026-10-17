@@ -72,7 +72,8 @@ export function RouteRows({ plan, selectedId, onSelect }: Props) {
         </>
       )}
       <p className="text-sm break-words text-muted-foreground">
-        {plan.forecastLabel} · Open-Meteo · ETAs assume no stops
+        {plan.forecastLabel}
+        {plan.demo ? '' : ' · Open-Meteo'} · ETAs assume no stops
       </p>
     </section>
   )

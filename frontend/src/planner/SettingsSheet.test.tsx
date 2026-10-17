@@ -11,11 +11,11 @@ vi.mock('../theme/theme', async (importOriginal) => ({
 describe('SettingsSheet', () => {
   afterEach(() => document.documentElement.classList.remove('dark'))
 
-  it('saves and applies Night', async () => {
+  it('saves and applies Dark', async () => {
     render(<SettingsSheet spacingMi={25} onSpacingChange={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    await userEvent.click(screen.getByRole('radio', { name: 'Night' }))
-    expect(saveThemeChoice).toHaveBeenCalledWith('night')
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }))
+    expect(saveThemeChoice).toHaveBeenCalledWith('dark')
     expect(document.documentElement).toHaveClass('dark')
   })
 

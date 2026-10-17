@@ -57,7 +57,7 @@ export function addRouteLayers(map: MapLibreMap, onSelect: (routeId: number) => 
       const row = document.createElement('div')
       row.textContent = line
       if (n === 0) row.className = 'font-medium'
-      if (n === 2) row.className = 'text-xs text-neutral-500'
+      if (n === 2) row.className = 'text-xs text-muted-foreground'
       body.append(row)
     })
     new Popup({ closeButton: true, maxWidth: '280px' }).setLngLat([lon, lat]).setDOMContent(body).addTo(map)

@@ -18,7 +18,16 @@ export type HeatmapField = {
   corners: [[number, number], [number, number], [number, number], [number, number]]
   values: Record<HeatmapKind, Float32Array> // physical units, hour-major, rows south to north
   present: Uint8Array // 1 where the node has a forecast; others are off the corridor
+  // Node (i, j) sits at (west + i * stepDeg, south + j * stepDeg).
+  west: number
+  south: number
+  stepDeg: number
+  windVectors: WindVectors | null // null on plans saved before wind direction was sent
 }
+
+// Wind as a vector in mph, in the same hour-major layout as `values`.
+// u points east, v points north: the way the wind blows toward.
+export type WindVectors = { u: Float32Array; v: Float32Array }
 
 type Rgba = [number, number, number, number]
 type Stop = { at: number; color: Rgba }
@@ -77,12 +86,17 @@ export function decodeHeatmap(h: Plan['heatmap']): HeatmapField {
   const south = h.south - half
   const east = h.west + (h.nx - 1) * h.step_deg + half
   const north = h.south + (h.ny - 1) * h.step_deg + half
-  const decode = (kind: HeatmapKind): Float32Array => {
-    const { scale, data } = h.channels[kind]
+  const decode = ({ scale, data }: { scale: number; data: string }): Float32Array => {
     const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
     return Float32Array.from(bytes, (b) => b * scale)
   }
-  const values = { risk: decode('risk'), wind: decode('wind'), rain: decode('rain'), snow: decode('snow') }
+  const { channels } = h
+  const values = {
+    risk: decode(channels.risk),
+    wind: decode(channels.wind),
+    rain: decode(channels.rain),
+    snow: decode(channels.snow),
+  }
   const present = Uint8Array.from(atob(h.mask), (c) => c.charCodeAt(0))
   return {
     nx: h.nx,
@@ -97,7 +111,60 @@ export function decodeHeatmap(h: Plan['heatmap']): HeatmapField {
     ],
     values,
     present,
+    west: h.west,
+    south: h.south,
+    stepDeg: h.step_deg,
+    windVectors: channels.wind_dir ? windVectors(values.wind, decode(channels.wind_dir)) : null,
   }
+}
+
+// Direction is where the wind blows FROM, so the vector points the other way:
+// a south-westerly (225 degrees) blows toward the north-east, u > 0 and v > 0.
+function windVectors(speed: Float32Array, fromDeg: Float32Array): WindVectors {
+  const u = new Float32Array(speed.length)
+  const v = new Float32Array(speed.length)
+  for (let k = 0; k < speed.length; k++) {
+    const s = speed[k] ?? 0
+    const rad = ((fromDeg[k] ?? 0) * Math.PI) / 180
+    u[k] = -s * Math.sin(rad)
+    v[k] = -s * Math.cos(rad)
+  }
+  return { u, v }
+}
+
+// The wind at a point, in mph: bilinear between the four surrounding nodes, linear between
+// the two neighbouring hours. Null off the grid or when any of the four nodes has no
+// forecast, so wind particles stop at the edge of the corridor.
+export function sampleWind(field: HeatmapField, hour: number, lon: number, lat: number): { u: number; v: number } | null {
+  const { nx, ny, hours, windVectors } = field
+  if (!windVectors || nx < 2 || ny < 2) return null
+  const gx = (lon - field.west) / field.stepDeg
+  const gy = (lat - field.south) / field.stepDeg
+  if (!(gx >= 0 && gy >= 0 && gx <= nx - 1 && gy <= ny - 1)) return null // also rejects NaN
+  const i = Math.min(Math.floor(gx), nx - 2)
+  const j = Math.min(Math.floor(gy), ny - 2)
+  const fx = gx - i
+  const fy = gy - j
+  const sw = j * nx + i
+  const nodes = [sw, sw + 1, sw + nx, sw + nx + 1]
+  if (nodes.some((k) => field.present[k] !== 1)) return null
+  const weights = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy]
+
+  const h = Math.min(Math.max(hour, 0), hours - 1)
+  const h0 = Math.floor(h)
+  const h1 = Math.min(h0 + 1, hours - 1)
+  const fh = h - h0
+  const n = nx * ny
+  const at = (values: Float32Array): number => {
+    let sum = 0
+    for (let c = 0; c < 4; c++) {
+      const k = nodes[c] ?? 0
+      const value = (values[h0 * n + k] ?? 0) * (1 - fh) + (values[h1 * n + k] ?? 0) * fh
+      sum += value * (weights[c] ?? 0)
+    }
+    return sum
+  }
+  return { u: at(windVectors.u), v: at(windVectors.v) }
 }
 
 // Writes one RGBA pixel per node into `out` (length nx * ny * 4), north row first.

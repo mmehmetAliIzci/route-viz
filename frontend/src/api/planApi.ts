@@ -14,6 +14,7 @@ const Checkpoint = z.object({
   lat: z.number(),
   eta_utc: z.string(),
   wind_mph: z.number(),
+  wind_dir_deg: z.number().optional(), // direction the wind blows from, 0-359; absent on older saved plans
   gust_mph: z.number(),
   rain_in_hr: z.number(),
   snow_in_hr: z.number(),
@@ -41,12 +42,17 @@ const Route = z.object({
 
 const Channel = z.object({ scale: z.number(), data: z.string() })
 
+// Synthetic weather for demos: one front sweeping the corridor. The plan says so when it is in effect.
+const DemoScenario = z.enum(['wind', 'rain', 'snow'])
+export type DemoScenario = z.infer<typeof DemoScenario>
+
 const SampleInfo = z.object({ id: z.string(), label: z.string(), recorded_utc: z.string() })
 export type SampleInfo = z.infer<typeof SampleInfo>
 
 const Plan = z
   .object({
     sample: SampleInfo.optional(), // present on saved trips only
+    demo: DemoScenario.optional(), // present when the weather is synthetic demo weather, not a forecast
     trip: z.object({
       origin: Place,
       destination: Place,
@@ -83,7 +89,8 @@ const Plan = z
       start_utc: z.string(),
       layout: z.string(),
       mask: z.string(),
-      channels: z.object({ risk: Channel, wind: Channel, rain: Channel, snow: Channel }),
+      // wind_dir: degrees the wind blows from, halved into one byte (scale 2); absent on older saved plans
+      channels: z.object({ risk: Channel, wind: Channel, rain: Channel, snow: Channel, wind_dir: Channel.optional() }),
     }),
   })
   .refine(
@@ -140,11 +147,12 @@ export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-export async function postPlan(trip: TripInput, signal?: AbortSignal): Promise<Plan> {
+// `demo` asks for synthetic demo weather instead of the forecast; omit it for a real plan.
+export async function postPlan(trip: TripInput, demo?: DemoScenario, signal?: AbortSignal): Promise<Plan> {
   const resp = await fetch('/api/plan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...trip, viewer_tz: browserTimeZone() }),
+    body: JSON.stringify({ ...trip, viewer_tz: browserTimeZone(), ...(demo ? { demo } : {}) }),
     signal,
   })
   return parse(Plan, await readJson(resp))
@@ -160,8 +168,10 @@ export async function listSamples(signal?: AbortSignal): Promise<SampleInfo[]> {
   return parse(z.object({ samples: z.array(SampleInfo) }), await readJson(resp)).samples
 }
 
-export async function getSample(id: string): Promise<Plan> {
-  const resp = await fetch(`/api/samples/${encodeURIComponent(id)}?tz=${encodeURIComponent(browserTimeZone())}`)
+export async function getSample(id: string, demo?: DemoScenario): Promise<Plan> {
+  const params = new URLSearchParams({ tz: browserTimeZone() })
+  if (demo) params.set('demo', demo)
+  const resp = await fetch(`/api/samples/${encodeURIComponent(id)}?${params}`)
   return parse(Plan, await readJson(resp))
 }
 

@@ -152,3 +152,29 @@
     @apply font-sans;
     }
 }
+
+/* The checkpoint popup follows the app theme instead of MapLibre's white default. */
+.maplibregl-popup-content {
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+}
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: var(--card);
+}
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: var(--card);
+}
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: var(--card);
+}
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: var(--card);
+}
+.maplibregl-popup-close-button {
+  color: var(--muted-foreground);
+}

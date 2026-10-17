@@ -11,9 +11,9 @@ const SPACINGS = [10, 25, 50] as const
 export type Spacing = (typeof SPACINGS)[number]
 
 const THEMES: { value: ThemeChoice; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'day', label: 'Day' },
-  { value: 'night', label: 'Night' },
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
 ]
 
 type Props = {
@@ -24,7 +24,7 @@ type Props = {
 
 const chipClass = 'h-14 flex-1 text-base'
 
-// Settings that rarely change: how often to check the weather, and day or night colors.
+// Settings that rarely change: how often to check the weather, and the light or dark theme.
 export function SettingsSheet({ spacingMi, onSpacingChange, triggerClassName }: Props) {
   const [theme, setTheme] = useState<ThemeChoice>(readThemeChoice)
 
@@ -46,7 +46,7 @@ export function SettingsSheet({ spacingMi, onSpacingChange, triggerClassName }: 
       <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="font-display text-2xl">Settings</SheetTitle>
-          <SheetDescription>How the planner checks weather and looks.</SheetDescription>
+          <SheetDescription>How often the planner checks the weather, and its theme.</SheetDescription>
         </SheetHeader>
         <div className="grid gap-6 px-4 pb-6">
           <div className="grid gap-2">
@@ -74,7 +74,7 @@ export function SettingsSheet({ spacingMi, onSpacingChange, triggerClassName }: 
           </div>
           <div className="grid gap-2">
             <Label id="settings-theme-label" className="text-[15px] text-muted-foreground uppercase">
-              Colors
+              Theme
             </Label>
             <ToggleGroup
               type="single"
@@ -91,7 +91,7 @@ export function SettingsSheet({ spacingMi, onSpacingChange, triggerClassName }: 
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
-            <p className="text-sm text-muted-foreground">Saved on this device.</p>
+            <p className="text-sm text-muted-foreground">System follows your device. Saved on this device.</p>
           </div>
         </div>
       </SheetContent>

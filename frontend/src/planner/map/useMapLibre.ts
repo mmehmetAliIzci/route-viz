@@ -3,14 +3,22 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { paintHour, type HeatmapField, type HeatmapKind } from '../model/heatmap'
 import type { PlanView } from '../model/planView'
+import type { ResolvedTheme } from '../../theme/theme'
 import { addRouteLayers, checkpointsGeoJson, ROUTES_CASING_LAYER, routesGeoJson } from './routeLayers'
 
 setWorkerUrl(workerUrl)
 
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
+// The basemap follows the app theme: Positron by day, Dark Matter at night.
+const STYLE_URLS: Record<ResolvedTheme, string> = {
+  light: 'https://tiles.openfreemap.org/styles/positron',
+  dark: 'https://tiles.openfreemap.org/styles/dark',
+}
 const US_CENTER: [number, number] = [-98.5, 39.5]
 const HEATMAP_SOURCE = 'heatmap'
 const HEATMAP_LAYER = 'heatmap'
+// Everything the app adds on top of the basemap, kept when the basemap changes.
+const OWN_SOURCES = new Set(['routes', 'checkpoints', HEATMAP_SOURCE])
+const OWN_LAYERS = new Set([HEATMAP_LAYER, ROUTES_CASING_LAYER, 'routes-line', 'checkpoints'])
 
 export type HeatmapDisplay = { field: HeatmapField; kind: HeatmapKind; hour: number }
 export type FitPadding = { top: number; bottom: number }
@@ -22,32 +30,39 @@ type Options = {
   onSelectRoute: (routeId: number) => void
   heatmap: HeatmapDisplay | null // null hides the heatmap
   fitPadding: FitPadding // space the routes keep clear of, for panels that cover the map
+  theme: ResolvedTheme // picks the basemap
 }
 
-// The MapLibre lifecycle for one map. Attach the returned ref to the map's container.
+// The MapLibre lifecycle for one map. Attach the returned `container` ref to the map's
+// container; `map` is the loaded map, null until its style has loaded.
 // Effects run in this order, and the order matters:
 //   1. create the map and add its controls; on 'load' add the route and checkpoint
 //      sources and layers, then publish the map (nothing below runs before that)
+//   1b. on a theme change, swap the basemap style and carry our sources and layers over
 //   2. on plan or selection change, setData on the routes and checkpoints sources
 //   3. on a new plan, or a resize, fit the routes in view
 //   4. heatmap canvas: when a field arrives, add the canvas source and layer under the
 //      routes; when the field goes away or changes, remove both
 //   5. paint the chosen hour into that canvas (reads the canvas step 4 created)
 //   6. on unmount, remove the map (the cleanup of step 1)
-export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding }: Options): RefObject<HTMLDivElement | null> {
+export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding, theme }: Options): {
+  container: RefObject<HTMLDivElement | null>
+  map: MapLibreMap | null
+} {
   const container = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<MapLibreMap | null>(null)
   const onSelectRef = useRef(onSelectRoute)
   useEffect(() => {
     onSelectRef.current = onSelectRoute
   }, [onSelectRoute])
+  const shownTheme = useRef(theme) // the theme the current basemap was built for
 
   // 1. Create, load, clean up.
   useEffect(() => {
     if (!container.current) return
     const m = new MapLibreMap({
       container: container.current,
-      style: STYLE_URL,
+      style: STYLE_URLS[shownTheme.current],
       center: US_CENTER,
       zoom: 3.3,
       attributionControl: { compact: true, customAttribution: 'Weather: Open-Meteo (CC BY 4.0) · Routes: TomTom' },
@@ -59,6 +74,23 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
     })
     return () => m.remove()
   }, [])
+
+  // 1b. Basemap follows the theme. setStyle would drop our sources and layers; transformStyle
+  // puts them back on top of the new basemap, data, canvas and click handlers included.
+  useEffect(() => {
+    if (!map || shownTheme.current === theme) return
+    shownTheme.current = theme
+    map.setStyle(STYLE_URLS[theme], {
+      transformStyle: (previous, next) => ({
+        ...next,
+        sources: {
+          ...next.sources,
+          ...Object.fromEntries(Object.entries(previous?.sources ?? {}).filter(([id]) => OWN_SOURCES.has(id))),
+        },
+        layers: [...next.layers, ...(previous?.layers ?? []).filter((l) => OWN_LAYERS.has(l.id))],
+      }),
+    })
+  }, [map, theme])
 
   // 2. Routes and checkpoints.
   useEffect(() => {
@@ -104,7 +136,7 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
     }
   }, [map, canvasRef, field, heatmap])
 
-  return container
+  return { container, map }
 }
 
 // One small canvas per plan, placed over the corridor and drawn under the routes.

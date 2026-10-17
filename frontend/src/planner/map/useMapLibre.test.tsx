@@ -1,8 +1,11 @@
 import { act, render } from '@testing-library/react'
+import { useEffect } from 'react'
 import fixture from '../../test/plan-kc-den.json'
 import { parsePlan } from '../../api/planApi'
 import { decodeHeatmap } from '../model/heatmap'
 import { buildPlanView } from '../model/planView'
+import type { StyleSpecification, StyleSwapOptions } from 'maplibre-gl'
+import type { ResolvedTheme } from '../../theme/theme'
 import { useMapLibre, type FitPadding, type HeatmapDisplay } from './useMapLibre'
 
 // A recording stand-in for MapLibre: the hook's calls are the behaviour under test.
@@ -49,6 +52,7 @@ const fake = vi.hoisted(() => {
     })
     getLayer = (id: string) => (state.layers.has(id) ? {} : undefined)
     getCanvas = () => ({ style: {} })
+    setStyle = vi.fn((url: string, _options?: StyleSwapOptions) => void calls.push(`setStyle:${url}`))
     remove = vi.fn(() => void calls.push('remove'))
   }
   return { calls, state, GeoJSONSource, CanvasSource, FakeMap }
@@ -73,10 +77,11 @@ type Props = {
   selectedId: number | null
   heatmap: HeatmapDisplay | null
   onSelectRoute?: (id: number) => void
+  theme?: ResolvedTheme
 }
 
-function Harness({ onSelectRoute = () => {}, ...rest }: Props) {
-  const container = useMapLibre({ ...rest, onSelectRoute, fitPadding })
+function Harness({ onSelectRoute = () => {}, theme = 'light', ...rest }: Props) {
+  const { container } = useMapLibre({ ...rest, onSelectRoute, fitPadding, theme })
   return <div ref={container} />
 }
 
@@ -180,6 +185,57 @@ describe('useMapLibre', () => {
       'addSource:heatmap',
       'addLayer:heatmap<routes-casing',
     ])
+  })
+
+  it('returns the map once it has loaded', async () => {
+    const seen: unknown[] = []
+    function Probe() {
+      const { container, map } = useMapLibre({
+        plan: null,
+        selectedId: null,
+        heatmap: null,
+        onSelectRoute: () => {},
+        fitPadding,
+        theme: 'light',
+      })
+      useEffect(() => void seen.push(map), [map])
+      return <div ref={container} />
+    }
+    render(<Probe />)
+    expect(seen).toEqual([null])
+    await loadMap()
+    expect(seen).toEqual([null, theMap()])
+  })
+
+  it('swaps the basemap when the theme changes and keeps its own layers on top', async () => {
+    const { rerender } = render(<Harness plan={view} selectedId={0} heatmap={null} theme="light" />)
+    await loadMap()
+    expect(theMap().setStyle).not.toHaveBeenCalled()
+
+    rerender(<Harness plan={view} selectedId={0} heatmap={null} theme="dark" />)
+    expect(theMap().setStyle).toHaveBeenCalledTimes(1)
+    const [url, options] = theMap().setStyle.mock.calls[0] ?? []
+    expect(url).toBe('https://tiles.openfreemap.org/styles/dark')
+    const empty = { type: 'FeatureCollection' as const, features: [] }
+    const previous: StyleSpecification = {
+      version: 8,
+      sources: { routes: { type: 'geojson', data: empty }, openmaptiles: { type: 'vector' } },
+      layers: [
+        { id: 'water', type: 'fill', source: 'openmaptiles' },
+        { id: 'routes-line', type: 'line', source: 'routes' },
+      ],
+    }
+    const next: StyleSpecification = {
+      version: 8,
+      sources: { dark: { type: 'vector' } },
+      layers: [{ id: 'bg', type: 'background' }],
+    }
+    const merged = options?.transformStyle?.(previous, next)
+    expect(Object.keys(merged?.sources ?? {})).toEqual(['dark', 'routes'])
+    expect(merged?.layers.map((l) => l.id)).toEqual(['bg', 'routes-line'])
+
+    rerender(<Harness plan={view} selectedId={0} heatmap={null} theme="dark" />)
+    expect(theMap().setStyle).toHaveBeenCalledTimes(1)
   })
 
   it('removes the map once on unmount', async () => {

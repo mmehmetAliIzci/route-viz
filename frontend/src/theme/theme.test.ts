@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { applyTheme, readThemeChoice, saveThemeChoice, startTheme } from './theme'
+import { renderHook, act } from '@testing-library/react'
+import { applyTheme, readThemeChoice, saveThemeChoice, startTheme, useResolvedTheme } from './theme'
 
 type Listener = (event: { matches: boolean }) => void
 
@@ -32,13 +33,13 @@ describe('theme', () => {
 
   it('applyTheme toggles the dark class', () => {
     mockMatchMedia(false)
-    applyTheme('night')
+    applyTheme('dark')
     expect(document.documentElement).toHaveClass('dark')
-    applyTheme('day')
+    applyTheme('light')
     expect(document.documentElement).not.toHaveClass('dark')
   })
 
-  it('auto follows matchMedia changes without restarting', () => {
+  it('system follows matchMedia changes without restarting', () => {
     const media = mockMatchMedia(false)
     const stop = startTheme()
     expect(document.documentElement).not.toHaveClass('dark')
@@ -52,29 +53,48 @@ describe('theme', () => {
 
   it('ignores system changes when the choice is fixed', () => {
     const media = mockMatchMedia(false)
-    saveThemeChoice('day')
+    saveThemeChoice('light')
     startTheme()
     media.fire(true)
     expect(document.documentElement).not.toHaveClass('dark')
   })
 
   it('round-trips the saved choice', () => {
-    expect(readThemeChoice()).toBe('auto')
-    saveThemeChoice('night')
-    expect(readThemeChoice()).toBe('night')
+    expect(readThemeChoice()).toBe('system')
+    saveThemeChoice('dark')
+    expect(readThemeChoice()).toBe('dark')
+  })
+
+  it('reads the names earlier builds stored', () => {
+    localStorage.setItem('spotter.theme', 'night')
+    expect(readThemeChoice()).toBe('dark')
+    localStorage.setItem('spotter.theme', 'day')
+    expect(readThemeChoice()).toBe('light')
+    localStorage.setItem('spotter.theme', 'auto')
+    expect(readThemeChoice()).toBe('system')
+  })
+
+  it('useResolvedTheme follows applyTheme', () => {
+    mockMatchMedia(false)
+    const { result } = renderHook(() => useResolvedTheme())
+    expect(result.current).toBe('light')
+    act(() => applyTheme('dark'))
+    expect(result.current).toBe('dark')
+    act(() => applyTheme('system'))
+    expect(result.current).toBe('light')
   })
 
   it('falls back to auto when storage throws on read', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    expect(readThemeChoice()).toBe('auto')
+    expect(readThemeChoice()).toBe('system')
   })
 
   it('does not throw when storage throws on write', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    expect(() => saveThemeChoice('night')).not.toThrow()
+    expect(() => saveThemeChoice('dark')).not.toThrow()
   })
 })

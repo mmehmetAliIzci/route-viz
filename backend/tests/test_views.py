@@ -26,8 +26,8 @@ def body(**over: object) -> dict:
 def builds(monkeypatch: pytest.MonkeyPatch) -> list:
     calls: list = []
 
-    def fake_build(trip: plan.Trip, api_key: str, viewer_tz: str = "UTC") -> dict:
-        calls.append((trip, viewer_tz))
+    def fake_build(trip: plan.Trip, api_key: str, viewer_tz: str = "UTC", demo: str | None = None) -> dict:
+        calls.append((trip, viewer_tz, demo))
         return {"ok": True}
 
     monkeypatch.setattr(plan, "build", fake_build)
@@ -94,7 +94,7 @@ def test_bad_trips_are_rejected(client: Client, builds: list, override: dict, fi
 def test_provider_errors_map_to_status(
     client: Client, monkeypatch: pytest.MonkeyPatch, code: str, http_status: int
 ) -> None:
-    def failing(trip: plan.Trip, api_key: str, viewer_tz: str = "UTC") -> dict:
+    def failing(trip: plan.Trip, api_key: str, viewer_tz: str = "UTC", demo: str | None = None) -> dict:
         raise ProviderError(code, "nope")
 
     monkeypatch.setattr(plan, "build", failing)
@@ -179,3 +179,44 @@ def test_saved_trip_rejects_an_unknown_zone(client: Client) -> None:
     resp = client.get("/api/samples/kansas-city-denver?tz=Mars/Olympus")
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_tz"
+
+
+def test_demo_is_passed_to_the_plan(client: Client, builds: list) -> None:
+    assert post(client, body(demo="snow")).status_code == 200
+    assert post(client, body()).status_code == 200
+    assert [b[2] for b in builds] == ["snow", None]
+
+
+def test_unknown_demo_is_rejected(client: Client, builds: list) -> None:
+    resp = post(client, body(demo="hail"))
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_trip"
+    assert "demo" in resp.json()["fields"]
+    assert builds == []
+
+
+def test_saved_trip_with_demo_weather(client: Client) -> None:
+    saved = client.get("/api/samples/kansas-city-denver").json()
+    resp = client.get("/api/samples/kansas-city-denver?demo=wind&tz=America/Denver")
+    assert resp.status_code == 200
+    wind = resp.json()
+    assert wind["demo"] == "wind"
+    assert wind["weather"]["model"] == "demo"
+    assert wind["trip"]["viewer_tz"] == "America/Denver"
+    assert wind["sample"] == saved["sample"]
+    assert [r["id"] for r in wind["routes"]] == [r["id"] for r in saved["routes"]]
+    assert "wind_dir" in wind["heatmap"]["channels"]
+    assert "demo" not in client.get("/api/samples/kansas-city-denver").json()
+
+
+def test_saved_trip_rejects_an_unknown_demo(client: Client) -> None:
+    resp = client.get("/api/samples/kansas-city-denver?demo=hail")
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "error": "invalid_demo",
+        "message": "Unknown demo weather. Use one of: wind, rain, snow.",
+    }
+    assert (
+        client.get("/api/samples/kansas-city-denver?demo=wind&tz=Mars/Olympus").json()["error"]
+        == "invalid_tz"
+    )

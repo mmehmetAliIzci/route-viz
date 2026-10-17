@@ -1,4 +1,4 @@
-import { browserTimeZone, type Level, type Plan, type PlanCheckpoint, type PlanRoute } from '../../api/planApi'
+import { browserTimeZone, type DemoScenario, type Level, type Plan, type PlanCheckpoint, type PlanRoute } from '../../api/planApi'
 
 // Projection from the API plan to what the route list and the map render. Both read only this.
 
@@ -60,7 +60,8 @@ export type PlanView = {
   routes: RouteView[]
   verdict: Verdict
   departureLabel: string
-  forecastLabel: string
+  forecastLabel: string // says "Demo weather" when the plan is synthetic
+  demo: DemoScenario | null // the synthetic storm behind this plan; null for a real forecast
   bounds: [[number, number], [number, number]]
 }
 
@@ -85,7 +86,8 @@ export function buildPlanView(plan: Plan): PlanView {
       arrivalLabel: formatClock(recommended.arrival_utc, tz),
     },
     departureLabel: formatTime(plan.trip.departure_utc, tz),
-    forecastLabel: forecastLabel(plan.weather),
+    forecastLabel: plan.demo ? demoLabel(plan.demo) : forecastLabel(plan.weather),
+    demo: plan.demo ?? null,
     bounds: boundsOf(plan.routes),
   }
 }
@@ -124,7 +126,7 @@ function checkpointView(c: PlanCheckpoint, id: string, tz: string): CheckpointVi
     etaLabel: formatTime(c.eta_utc, tz),
     level: LEVELS[c.level],
     causeLabel: c.cause ? c.cause.charAt(0).toUpperCase() + c.cause.slice(1) : null,
-    weatherLabel: `Wind ${Math.round(c.wind_mph)} mph (gusts ${Math.round(c.gust_mph)}) · Rain ${c.rain_in_hr.toFixed(2)} in/hr · Snow ${c.snow_in_hr.toFixed(1)} in/hr`,
+    weatherLabel: `Wind ${Math.round(c.wind_mph)} mph${c.wind_dir_deg === undefined ? '' : ` from ${compassPoint(c.wind_dir_deg)}`} (gusts ${Math.round(c.gust_mph)}) · Rain ${c.rain_in_hr.toFixed(2)} in/hr · Snow ${c.snow_in_hr.toFixed(1)} in/hr`,
   }
 }
 
@@ -174,6 +176,19 @@ export function hourLabel(plan: PlanView, hour: number): string {
   const whole = Math.round(hour)
   const at = new Date(Date.parse(plan.departureUtc) + whole * 3_600_000).toISOString()
   return `${whole === 0 ? 'Departure' : `+${whole} h`} · ${formatTime(at, plan.viewerTz)}`
+}
+
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
+
+// The 8-point compass name for a bearing in degrees: 0 is N, 45 is NE, rounded to the nearest point.
+export function compassPoint(deg: number): string {
+  const point = Math.round((((deg % 360) + 360) % 360) / 45) % COMPASS.length
+  return COMPASS[point] ?? 'N'
+}
+
+// "Demo weather: a synthetic wind storm sweeping the corridor (not a forecast)"
+function demoLabel(demo: DemoScenario): string {
+  return `Demo weather: a synthetic ${demo} storm sweeping the corridor (not a forecast)`
 }
 
 // "ICON forecast on a 0.35° grid (about 39 km), 189 points"

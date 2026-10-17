@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { getSample, postPlan, type TripInput } from '../api/planApi'
+import { getSample, postPlan, type DemoScenario, type TripInput } from '../api/planApi'
 import { decodeHeatmap, type HeatmapField } from './model/heatmap'
 import { buildPlanView, type PlanView } from './model/planView'
 import { PlannerDesktop } from './PlannerDesktop'
@@ -10,18 +10,20 @@ import { SavedTrips } from './SavedTrips'
 import { SettingsSheet, type Spacing } from './SettingsSheet'
 import { TripForm } from './TripForm'
 import { useMediaQuery } from './useMediaQuery'
-import { WeatherControls, type LayerChoice } from './WeatherControls'
+import { WeatherControls, type DemoChoice, type LayerChoice } from './WeatherControls'
 
 // MapLibre is most of the bundle; load it after the form has rendered.
 const PlanMap = lazy(() => import('./PlanMap').then((m) => ({ default: m.PlanMap })))
 
-const PHONE_TOP_COVER = 240 // px: top bar plus weather card
+const PHONE_TOP_COVER = 300 // px: top bar plus weather card with its demo row and demo line
 
 type PlanRequest = { kind: 'live'; trip: TripInput } | { kind: 'saved'; sampleId: string }
 type ShownPlan = { view: PlanView; field: HeatmapField }
 
-async function requestPlan(request: PlanRequest): Promise<ShownPlan> {
-  const plan = request.kind === 'live' ? await postPlan(request.trip) : await getSample(request.sampleId)
+type PlanJob = { request: PlanRequest; demo: DemoScenario | undefined }
+
+async function requestPlan({ request, demo }: PlanJob): Promise<ShownPlan> {
+  const plan = request.kind === 'live' ? await postPlan(request.trip, demo) : await getSample(request.sampleId, demo)
   return { view: buildPlanView(plan), field: decodeHeatmap(plan.heatmap) }
 }
 
@@ -35,6 +37,8 @@ export function PlannerScreen() {
   const [hour, setHour] = useState(0)
   const [layer, setLayer] = useState<LayerChoice>('risk')
   const [spacingMi, setSpacingMi] = useState<Spacing>(25)
+  const [demo, setDemo] = useState<DemoChoice>('off')
+  const [lastRequest, setLastRequest] = useState<PlanRequest | null>(null) // what the toggle re-asks
 
   const plan = useMutation({
     mutationFn: requestPlan,
@@ -44,6 +48,8 @@ export function PlannerScreen() {
       setHour(0)
       setEditing(false)
     },
+    // The plan on screen did not change, so the switch goes back to what that plan used.
+    onError: () => setDemo(shown?.view.demo ?? 'off'),
   })
 
   const view = shown?.view ?? null
@@ -61,15 +67,27 @@ export function PlannerScreen() {
     [isDesktop],
   )
 
+  function request(next: PlanRequest, scenario: DemoChoice = demo) {
+    setLastRequest(next)
+    plan.mutate({ request: next, demo: scenario === 'off' ? undefined : scenario })
+  }
+
   function submit(input: TripInput) {
     setTrip(input)
     setEditing(false)
-    plan.mutate({ kind: 'live', trip: input })
+    request({ kind: 'live', trip: input })
   }
 
   function openSaved(sampleId: string) {
     setEditing(false)
-    plan.mutate({ kind: 'saved', sampleId })
+    request({ kind: 'saved', sampleId })
+  }
+
+  // Picking a storm also shows its layer; turning demo off leaves the layer where the driver put it.
+  function chooseDemo(next: DemoChoice) {
+    setDemo(next)
+    if (next !== 'off') setLayer(next)
+    if (lastRequest && view) request(lastRequest, next)
   }
 
   const layout = {
@@ -101,6 +119,9 @@ export function PlannerScreen() {
           onHourChange={setHour}
           layer={layer}
           onLayerChange={setLayer}
+          demo={demo}
+          onDemoChange={chooseDemo}
+          disabled={plan.isPending}
         />
       ) : null,
     form: <TripForm initial={trip} isPlanning={plan.isPending} spacingMi={spacingMi} onSubmit={submit} />,

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import fixture from '../test/plan-kc-den.json'
 import * as planApi from '../api/planApi'
@@ -15,6 +15,7 @@ vi.mock('../api/planApi', async (importOriginal) => ({
 
 const plan = planApi.parsePlan(fixture)
 const savedName = 'Kansas City, MO to Denver, CO'
+const demoLine = 'Demo weather: synthetic storm, not a forecast.'
 
 function mockViewport(isDesktop: boolean) {
   vi.stubGlobal(
@@ -119,6 +120,37 @@ describe('PlannerScreen on a phone', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Edit trip' }))
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     expect(screen.getByRole('heading', { name: /^Take / }).closest('[aria-busy="true"]')).not.toBeNull()
+  })
+
+  it('asks for demo weather again for the same trip and shows its layer', async () => {
+    vi.mocked(planApi.getSample).mockImplementation(async (_id, demo) => (demo ? { ...plan, demo } : plan))
+    renderScreen()
+    await userEvent.click(await screen.findByRole('button', { name: savedName }))
+    await screen.findByTestId('map')
+    const demoGroup = screen.getByRole('radiogroup', { name: 'Demo weather' })
+    const layerGroup = screen.getByRole('radiogroup', { name: 'Map weather layer' })
+    expect(within(layerGroup).getByRole('radio', { name: 'Risk' })).toBeChecked()
+    expect(screen.queryByText(demoLine)).not.toBeInTheDocument()
+
+    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Wind' }))
+    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', 'wind')
+    expect(await screen.findByText(demoLine)).toBeInTheDocument()
+    expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked()
+
+    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Off' }))
+    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', undefined)
+    await waitFor(() => expect(screen.queryByText(demoLine)).not.toBeInTheDocument())
+    expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked() // turning demo off keeps the layer
+  })
+
+  it('locks the demo switch while a new plan loads', async () => {
+    renderScreen()
+    await userEvent.click(await screen.findByRole('button', { name: savedName }))
+    await screen.findByTestId('map')
+    vi.mocked(planApi.getSample).mockReturnValue(new Promise(() => {}))
+    const demoGroup = screen.getByRole('radiogroup', { name: 'Demo weather' })
+    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Rain' }))
+    expect(within(demoGroup).getByRole('radio', { name: 'Snow' })).toBeDisabled()
   })
 
   it('shows an error and keeps the saved trips when planning fails', async () => {

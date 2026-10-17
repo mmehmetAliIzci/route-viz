@@ -1,6 +1,6 @@
 # Truck weather routes
 
-A React + Django app that helps a truck driver pick a route by the weather the truck will meet. Enter origin, destination, departure time and load weight; the app gets three truck routes, checks the weather at checkpoints every 10, 25 or 50 miles at the time the truck passes each one, scores them with the assessment's risk and load rules, and recommends one. A corridor heatmap with a 0 to 48 hour slider shows risk, wind, rain or snow around the routes.
+A React + Django app that helps a truck driver pick a route by the weather the truck will meet. Enter origin, destination, departure time and load weight; the app gets three truck routes, checks the weather at checkpoints every 10, 25 or 50 miles at the time the truck passes each one, scores them with the assessment's risk and load rules, and recommends one. A corridor heatmap with a 0 to 48 hour slider shows risk, wind, rain or snow around the routes; the wind layer also animates particles along the wind direction. A demo weather switch rescored any trip against a synthetic storm, so every risk level can be shown on a calm day.
 
 ## Run it locally
 
@@ -47,11 +47,13 @@ The API logs one line per provider call (`provider_call provider= status= ms= ca
 
 1. **Routes.** TomTom Calculate Route in truck mode returns up to three routes. TomTom's time at each maneuver gives the ETA profile along each route.
 2. **Checkpoints.** One every N miles from the origin, plus the destination. Each checkpoint stands for half the gap to its neighbours ("owned miles"), so a route's owned miles add up to its length.
-3. **Weather.** One Open-Meteo request (DWD ICON model) for a grid of points around the routes: the corners of every grid cell a route passes through. The grid step is the finest that keeps it at about 200 points. Checkpoints read this grid at their ETA (bilinear in space, linear in time); the heatmap draws the same grid.
+3. **Weather.** One Open-Meteo request (DWD ICON model) for a grid of points around the routes: the corners of every grid cell a route passes through. The grid step is the finest that keeps it at about 200 points. Checkpoints read this grid at their ETA (bilinear in space, linear in time); the heatmap draws the same grid. Wind direction comes along as a fifth heatmap channel and is interpolated through its components, so it never turns the long way round through north. The wind layer streams particles along it.
 4. **Risk.** Each checkpoint's level is the worst of its wind, rain and snow levels from the assessment table, with the load rules applied to wind.
 5. **Recommendation.** Routes are ranked by No Travel miles, then the assessment's order: Severe miles, High miles, average risk, travel time. The reason names the criterion that beat the runner-up.
 
 All scoring happens in Python (`backend/planner/`); the frontend only displays it.
+
+**Demo weather.** `POST /api/plan` with `"demo": "wind" | "rain" | "snow"`, or `GET /api/samples/<id>?demo=wind`, swaps the forecast for one synthetic front (`backend/planner/demo.py`) on the same grid a forecast would use. It sweeps the corridor over the 48 hours and crosses every risk level. Checkpoints, levels, ranking, the recommendation text and the heatmap all come from it, and the plan carries `"demo"` and a weather source of "Demo weather (synthetic, not a forecast)". The weather card's Demo weather switch drives it. It is a demo aid, never a forecast.
 
 ## Assumptions
 
@@ -72,7 +74,7 @@ All scoring happens in Python (`backend/planner/`); the frontend only displays i
 - **Accepted limitation: the cache and rate limits are per process.** They use Django's in-memory cache. On Vercel each function instance has its own, so a cold instance starts empty and the real limit across instances is higher than the numbers below. A shared cache such as Redis would fix both; for a proof of concept it is not worth the extra service.
 - **Rate limits.** `/api/plan` allows 10 requests a minute per IP and `/api/geocode` 60; over that the API answers 429 `rate_limited` with `Retry-After`. Behind a proxy (Vercel), set `DJANGO_NUM_PROXIES=1` so the limit keys on the client IP and not the proxy's.
 - **Time budget.** A plan must finish in 25 seconds. Each provider call gets what is left of that budget as its timeout; when it runs out the API answers 504 `plan_timeout`. Routing and weather cannot run in parallel, because the weather grid is built from the route shapes.
-- Saved trips (`backend/data/samples/`) are real plans recorded on 2026-10-15. Re-record them with `uv run python scripts/record_samples.py` from `backend/`.
+- Saved trips (`backend/data/samples/`) are real plans recorded on 2026-10-15, before wind direction was requested, so their wind layer shows no particles until they are re-recorded with `uv run python scripts/record_samples.py` from `backend/` (needs a TomTom key). Demo weather on a saved trip always has direction.
 - The map (MapLibre, about 1 MB) loads in its own chunk after the form, so the first screen does not wait for it.
 - No end-to-end browser tests yet.
 
@@ -80,7 +82,7 @@ All scoring happens in Python (`backend/planner/`); the frontend only displays i
 
 - Routes and place search: [TomTom](https://developer.tomtom.com/) (key required, server side only).
 - Weather: [Open-Meteo](https://open-meteo.com/), DWD ICON model, CC BY 4.0. The free API is for non-commercial use.
-- Basemap: [OpenFreeMap](https://openfreemap.org/), © OpenMapTiles, data © OpenStreetMap contributors.
+- Basemap: [OpenFreeMap](https://openfreemap.org/) Positron in the light theme and Dark in the dark theme, © OpenMapTiles, data © OpenStreetMap contributors.
 
 ## Repository
 

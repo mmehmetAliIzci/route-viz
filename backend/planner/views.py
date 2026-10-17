@@ -1,4 +1,7 @@
-"""HTTP API: POST /api/plan and GET /api/geocode. Errors are {"error": code, "message": text}."""
+"""HTTP API: POST /api/plan, GET /api/geocode and saved trips (optionally ?demo=wind|rain|snow).
+
+Errors are {"error": code, "message": text}.
+"""
 
 import hashlib
 import logging
@@ -15,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import exception_handler
 
-from planner import explain, geocode, plan, samples
+from planner import demo, explain, geocode, plan, samples
 from planner.http import CACHE_S, ProviderError
 
 log = logging.getLogger("planner")
@@ -39,6 +42,9 @@ class TripIn(serializers.Serializer):
     load_lb = serializers.IntegerField(min_value=0, max_value=80_000)
     spacing_mi = serializers.ChoiceField(choices=[10, 25, 50])
     viewer_tz = serializers.CharField(required=False, default="UTC", max_length=64)
+    demo = serializers.ChoiceField(
+        choices=list(demo.SCENARIOS), required=False, allow_null=True, default=None
+    )
 
     def validate_viewer_tz(self, value: str) -> str:
         try:
@@ -123,7 +129,7 @@ def plan_view(request: Request) -> Response:
         spacing_mi=int(v["spacing_mi"]),
     )
     try:
-        body = plan.build(trip, settings.TOMTOM_API_KEY, v["viewer_tz"])
+        body = plan.build(trip, settings.TOMTOM_API_KEY, v["viewer_tz"], demo=v["demo"])
     except ProviderError as exc:
         log.warning("plan_failed code=%s", exc.code)
         return provider_error(exc)
@@ -159,7 +165,19 @@ def sample_view(request: Request, sample_id: str) -> Response:
     body = samples.get(sample_id)
     if body is None:
         return error("sample_not_found", "There is no saved trip with this id.", status.HTTP_404_NOT_FOUND)
+    tz = request.query_params.get("tz")
+    scenario = request.query_params.get("demo")
+    if scenario is not None and scenario not in demo.SCENARIOS:
+        return error(
+            "invalid_demo",
+            f"Unknown demo weather. Use one of: {', '.join(demo.SCENARIOS)}.",
+            status.HTTP_400_BAD_REQUEST,
+        )
     try:
-        return Response(samples.in_zone(body, request.query_params.get("tz")))
+        if scenario is not None:
+            return Response(samples.with_demo(body, scenario, tz))
+        return Response(samples.in_zone(body, tz))
     except ValueError as exc:
         return error("invalid_tz", str(exc), status.HTTP_400_BAD_REQUEST)
+    except ProviderError as exc:
+        return provider_error(exc)

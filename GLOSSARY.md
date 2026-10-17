@@ -89,3 +89,17 @@ _Avoid_: Area, bbox, region
 **Hour**:
 The slider position: whole hours after departure, 0 to 48.
 _Avoid_: Time step, frame, forecast hour
+
+**Wind direction**:
+Where the wind blows from, as a compass bearing. The wind layer streams particles downwind from it.
+_Avoid_: Heading, bearing, wind vector
+
+**Demo weather**:
+A made-up storm, one of wind, rain or snow, that sweeps the corridor and replaces the forecast for a plan so every level can be shown. Never a forecast.
+_Avoid_: Mock weather, test mode, fake forecast, scenario
+
+## Appearance
+
+**Theme**:
+Light or dark colours for the whole app, map included. System follows the device.
+_Avoid_: Colors, day, night, dark mode
