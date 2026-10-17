@@ -15,6 +15,7 @@ import {
   worstStretch,
   stretchSentence,
   loadNote,
+  tradeoffLine,
   type CheckpointView,
   type RouteView,
 } from './planView'
@@ -356,5 +357,43 @@ describe('worstStretch', () => {
     expect(loadNote(38_000)).toBe('38,000 lb load: wind over 45 mph is No Travel.')
     expect(loadNote(44_000)).toContain('over 35 mph is Severe')
     expect(loadNote(20_000)).toContain('over 55 mph')
+  })
+})
+
+describe('tradeoffLine', () => {
+  const [a, b, c] = plan.routes
+  const hours = (h: number) => h * 3600
+  const summary = (over: Partial<(typeof plan.routes)[number]['summary']>) => ({ ...a!.summary, ...over })
+
+  it('is null when the recommended route is within an hour of the fastest', () => {
+    const view = buildPlanView(plan) // the fixture recommends the fastest route
+    expect(view.verdict.tradeoff).toBeNull()
+  })
+
+  it('names the fastest road that beats the winner by an hour, and the hazard miles it adds', () => {
+    const slowWinner = { ...a!, duration_s: hours(29), summary: summary({ no_travel_mi: 187.5, max_level: 'no_travel' }) }
+    const fast = {
+      ...b!,
+      duration_s: hours(23.9),
+      summary: summary({ no_travel_mi: 237.5, max_level: 'no_travel' }),
+      checkpoints: b!.checkpoints.map((cp, i) => (i === 2 ? { ...cp, level: 'no_travel' as const, cause: 'wind' as const } : cp)),
+    }
+    const stormy = { ...plan, routes: [slowWinner, fast, { ...c!, duration_s: hours(30) }] } // the third road is slower still
+    const view = buildPlanView(stormy)
+    expect(view.verdict.tradeoff).toBe(
+      `Trade-off: ${b!.name} is 5 h 6 min faster, but has 50 more mi of No travel wind (238 vs 188).`,
+    )
+  })
+
+  it('falls back to average risk when the faster road adds no hazard miles', () => {
+    const slowWinner = { ...a!, duration_s: hours(10) }
+    const fast = { ...b!, duration_s: hours(8.5) }
+    const view = buildPlanView({ ...plan, routes: [slowWinner, fast, { ...c!, duration_s: hours(11) }] })
+    expect(view.verdict.tradeoff).toBe(`Trade-off: ${b!.name} is 1 h 30 min faster, but scores higher average risk.`)
+  })
+
+  it('ignores roads less than an hour faster', () => {
+    const close = { ...plan, routes: [{ ...a!, duration_s: hours(10) }, { ...b!, duration_s: hours(9.2) }, { ...c!, duration_s: hours(11) }] }
+    expect(tradeoffLine(close, buildPlanView(close).routes)).toBeNull()
   })
 })

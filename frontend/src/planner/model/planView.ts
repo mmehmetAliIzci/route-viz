@@ -68,6 +68,7 @@ export type Verdict = {
   stretch: WorstStretch | null // what the driver will hit on this route, null when clear
   stretchLine: string // the stretch as a sentence, or the clear-day sentence
   whyLine: string // how this route beat the runner-up, in one short sentence
+  tradeoff: string | null // when another road is at least an hour faster: what it saves and what it costs
   loadNote: string | null // the wind rule for this load, when wind is what the driver will hit
 }
 
@@ -126,6 +127,7 @@ export function buildPlanView(plan: Plan): PlanView {
       stretch: best.stretch,
       stretchLine: stretchSentence(best.stretch, plan.trip.origin.label, plan.trip.destination.label),
       whyLine: whyLine(plan, routes),
+      tradeoff: tradeoffLine(plan, routes),
       loadNote: best.stretch?.cause === 'wind' ? loadNote(plan.trip.load_lb) : null,
     },
     departureLabel: formatTime(plan.trip.departure_utc, tz),
@@ -412,4 +414,33 @@ export function loadNote(loadLb: number): string {
   if (loadLb > 40_000) return `${load}: wind over 35 mph is Severe, over 45 mph is No Travel.`
   if (loadLb > 30_000) return `${load}: wind over 45 mph is No Travel.`
   return `${load}: wind over 55 mph is No Travel.`
+}
+
+export const TRADEOFF_MIN_S = 60 * 60 // a faster road is worth a warning from an hour saved
+
+// When a slower road wins, a driver should see the price. Names the fastest road that beats the
+// recommended one by at least an hour, and the hazard miles it would add; null when the
+// recommended route is within an hour of the fastest.
+export function tradeoffLine(plan: Plan, routes: RouteView[]): string | null {
+  const best = plan.routes.find((r) => r.id === plan.recommendation.route_id)
+  if (!best) return null
+  const faster = plan.routes
+    .filter((r) => r.id !== best.id && best.duration_s - r.duration_s >= TRADEOFF_MIN_S)
+    .sort((a, b) => a.duration_s - b.duration_s)[0]
+  if (!faster) return null
+  const saved = formatDuration(best.duration_s - faster.duration_s)
+  const levels: [keyof PlanRoute['summary'], Level][] = [
+    ['no_travel_mi', 'no_travel'],
+    ['severe_mi', 'severe'],
+    ['high_mi', 'high'],
+  ]
+  for (const [key, level] of levels) {
+    const more = Number(faster.summary[key]) - Number(best.summary[key])
+    if (more > 0.05) {
+      const cause = routes.find((r) => r.id === faster.id)?.stretch
+      const what = `${LEVELS[level].label}${cause?.level.key === level && cause.cause ? ` ${cause.cause}` : ' weather'}`
+      return `Trade-off: ${faster.name} is ${saved} faster, but has ${Math.round(more)} more mi of ${what} (${Math.round(Number(faster.summary[key]))} vs ${Math.round(Number(best.summary[key]))}).`
+    }
+  }
+  return `Trade-off: ${faster.name} is ${saved} faster, but scores higher average risk.`
 }

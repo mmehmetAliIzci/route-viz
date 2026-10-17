@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import fixture from '../test/plan-kc-den.json'
 import { parsePlan } from '../api/planApi'
@@ -19,6 +19,18 @@ describe('VerdictCard', () => {
     ).toBeInTheDocument()
     expect(screen.getByText(view.verdict.stretchLine)).toBeInTheDocument()
     expect(screen.getByText(view.verdict.whyLine)).toBeInTheDocument()
+  })
+
+  it('warns when a much faster road lost on hazard miles, and stays quiet otherwise', () => {
+    render(<VerdictCard plan={view} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument() // the fixture recommends the fastest route
+    cleanup()
+    const [a, b, c] = plan.routes
+    const slowWinner = { ...a!, duration_s: 29 * 3600, summary: { ...a!.summary, no_travel_mi: 187.5, max_level: 'no_travel' as const } }
+    const fast = { ...b!, duration_s: 23.9 * 3600, summary: { ...b!.summary, no_travel_mi: 237.5, max_level: 'no_travel' as const } }
+    const stormy = buildPlanView({ ...plan, routes: [slowWinner, fast, { ...c!, duration_s: 30 * 3600 }] })
+    render(<VerdictCard plan={stormy} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(`Trade-off: ${b!.name} is 5 h 6 min faster, but has 50 more mi of No travel weather (238 vs 188).`)
   })
 
   it('shows Show on map only when a handler is given', async () => {

@@ -1,4 +1,4 @@
-import { ChevronUp } from 'lucide-react'
+import { ChevronUp, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PlanView } from './model/planView'
 
@@ -49,6 +49,15 @@ export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapR
         {verdict.whyLine}
         {verdict.loadNote ? ` ${verdict.loadNote}` : ''}
       </p>
+      {verdict.tradeoff && (
+        <p
+          role="alert"
+          className="flex items-start gap-2 rounded-xl bg-destructive px-3 py-2.5 text-sm font-semibold break-words text-white shadow-md"
+        >
+          <TriangleAlert className="mt-0.5 size-5 shrink-0" aria-hidden />
+          <span className="min-w-0">{verdict.tradeoff}</span>
+        </p>
+      )}
       {onSelect && !selected && mapRouteName && <p className="text-sm">Map shows {mapRouteName}</p>}
       {onShowOnMap && (
         <Button
