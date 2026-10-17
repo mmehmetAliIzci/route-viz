@@ -32,6 +32,8 @@ def test_summary_miles_never_exceed_the_route(kc_den: dict) -> None:
         s = r["summary"]
         assert s["no_travel_mi"] + s["severe_mi"] + s["high_mi"] <= r["distance_mi"] + 0.1
         assert 0 <= s["avg_risk"] <= 4
+        weighted = s["moderate_mi"] + 3 * s["high_mi"] + 9 * s["severe_mi"] + 27 * s["no_travel_mi"]
+        assert s["risk_score"] == pytest.approx(weighted, abs=2)  # each level's miles are rounded to 0.1
 
 
 def test_recommendation_matches_the_summaries(kc_den: dict) -> None:
@@ -42,6 +44,7 @@ def test_recommendation_matches_the_summaries(kc_den: dict) -> None:
             high_mi=r["summary"]["high_mi"],
             moderate_mi=r["summary"]["moderate_mi"],
             avg_risk=r["summary"]["avg_risk"],
+            risk_score=r["summary"]["risk_score"],
             max_level=Level.LOW,
             duration_s=r["duration_s"],
         )
@@ -167,11 +170,16 @@ def test_demo_recommendation_matches_the_summaries(kc_den_wind: dict) -> None:
 
 def test_leave_later_is_null_or_an_improvement_with_a_fixed_shape() -> None:
     # The demo front sweeps the whole corridor, so a trip meets it whenever it leaves; the field
-    # is then null. When it is not null it must beat the current departure on No Travel miles.
+    # is then null. When it is not null it has a fixed shape.
     body = build_kc_den(demo="wind")
     waiting = body["recommendation"]["leave_later"]
-    best = next(r for r in body["routes"] if r["id"] == body["recommendation"]["route_id"])
     if waiting is not None:
         assert waiting["shift_h"] in (3, 6, 12, 24)
-        assert waiting["no_travel_mi"] <= best["summary"]["no_travel_mi"]
-        assert set(waiting) == {"shift_h", "departure_utc", "no_travel_mi", "severe_mi", "high_mi", "max_level"}
+        assert set(waiting) == {
+            "shift_h",
+            "departure_utc",
+            "no_travel_mi",
+            "severe_mi",
+            "high_mi",
+            "max_level",
+        }

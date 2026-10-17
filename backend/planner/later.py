@@ -21,11 +21,6 @@ class LaterDeparture:
     summary: ranking.Summary
 
 
-def _key(s: ranking.Summary) -> tuple[float, float, float]:
-    """The ranking's first three criteria, rounded as the ranking rounds them."""
-    return (round(s.no_travel_mi, 1), round(s.severe_mi, 1), round(s.high_mi, 1))
-
-
 def leave_later(
     checkpoints: list[sampling.Checkpoint],
     duration_s: float,
@@ -34,7 +29,7 @@ def leave_later(
     departure: datetime,
     now: ranking.Summary,
 ) -> LaterDeparture | None:
-    """The smallest later departure that has fewer No Travel, Severe or High miles than `now`.
+    """The smallest later departure with a lower risk score than `now`, and not a near-tie with it.
 
     None when the route is already Moderate or better, or when no shift the grid still
     covers improves on it.
@@ -55,6 +50,6 @@ def leave_later(
                 )
             )
         later = ranking.summarize(scored, duration_s)
-        if _key(later) < _key(now):
+        if later.risk_score < now.risk_score and not ranking.near_tied(later.risk_score, now.risk_score):
             return LaterDeparture(hours, departure + delta, later)
     return None

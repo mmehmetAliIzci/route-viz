@@ -240,6 +240,8 @@ def render(b):
 def build():
     TOC.clear()
     body = "\n".join(render(b) for b in C.BLOCKS)
+    # Diagram CSS: the shared rules plus anything extra a diagram brings, once each.
+    extra = sorted({b["css"].replace(DIAGRAM_CSS, "") for b in C.BLOCKS if b["type"] == "diagram"} - {""})
     toc = "".join(f'<a class="h{lvl}" href="#{hid}">{esc(title)}</a>' for lvl, title, hid in TOC)
     page = f"""<!doctype html>
 <html lang="en">
@@ -248,7 +250,7 @@ def build():
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(C.TITLE)} · How it works</title>
 <meta name="description" content="{esc(C.BRIEF)}">
-<style>{PAGE_CSS}{DIAGRAM_CSS}</style>
+<style>{PAGE_CSS}{DIAGRAM_CSS}{"".join(extra)}</style>
 </head>
 <body>
 <div class="layout">

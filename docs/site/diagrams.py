@@ -252,34 +252,47 @@ def pipeline():
     return _svg(p, 820, yl + 44, "plan.build runs six steps; each arrow names the data passed on, and the weather grid also feeds the heatmap.", "".join(o)), CSS
 
 
-# 6. Ranking ladder ----------------------------------------------------------
-def ranking_ladder():
-    p = "rk"
-    A = f"{p}-a"
-    rows = [
-        ("No Travel miles", "67", "100", "decides"),
-        ("Severe miles", "50", "123", "not reached"),
-        ("High miles", "75", "50", "not reached"),
-        ("Average risk", "1.02", "1.43", "not reached"),
-        ("Travel time", "8 h 9", "11 h 21", "not reached"),
-    ]
-    o = [t(300, 24, "Kansas route", "b", "middle"), t(440, 24, "Small highways", "b", "middle")]
-    o += [t(300, 40, "I-70 W / I-670 W · wins", "s", "middle"), t(440, 40, "US-36 W / US-34 W", "s", "middle")]
-    y0, rh = 60, 46
-    for i, (name, a, b, verdict) in enumerate(rows):
-        y = y0 + i * rh
-        acc = verdict == "decides"
-        faint = verdict == "not reached"
-        g = ' class="faint"' if faint else ""
-        o.append(f"<g{g}>")
-        o += [rect(40, y, 560, 34, "boxa" if acc else "box", 6), t(56, y + 22, f"{i + 1}. {name}", "b" if acc else "")]
-        o += [t(300, y + 22, a, "b" if acc else "", "middle"), t(370, y + 22, "<" if acc else "", "b", "middle"), t(440, y + 22, b, "", "middle")]
-        o += [t(616, y + 22, verdict, "b" if acc else "s")]
-        o.append("</g>")
-        if False:
-            o += [line(30, y + 17, 30, y + rh + 15, "ln", A)]
-    o += [t(56, y0 + 5 * rh + 18, "Lower is better. A tie moves down one row; the first row that differs decides.", "s")]
-    return _svg(p, 720, y0 + 5 * rh + 30, "Kansas City to Denver under the demo storm: the first question, No Travel miles, already separates the two best routes, so the rest is never asked.", "".join(o)), CSS
+# 6. Risk points -------------------------------------------------------------
+WEIGHTS = (("No Travel", 27, "seg-nt"), ("Severe", 9, "seg-sev"), ("High", 3, "seg-high"), ("Moderate", 1, "seg-mod"))
+
+
+def risk_points(rows):
+    """Stacked bars of each route's risk points by level. rows: (name, note, {level: miles})."""
+    p = "rp"
+    totals = [sum(m.get(lvl, 0) * w for lvl, w, _ in WEIGHTS) for _, _, m in rows]
+    x0, width, rh = 260, 430, 56
+    scale = width / max(totals)
+    best = totals.index(min(totals))
+    o = []
+    for i, ((name, note, miles), total) in enumerate(zip(rows, totals)):
+        y = 34 + i * rh
+        o += [t(20, y + 15, name, "b"), t(20, y + 31, note, "s")]
+        x = x0
+        for lvl, w, cls in WEIGHTS:
+            pts = miles.get(lvl, 0) * w
+            if pts <= 0:
+                continue
+            seg = pts * scale
+            o.append(f'<rect x="{x:.1f}" y="{y}" width="{seg:.1f}" height="28" class="{cls}"/>')
+            if seg > 46:
+                light = cls in ("seg-nt", "seg-sev")
+                o.append(t(x + seg / 2, y + 18, f"{round(pts):,}", "seg-label" if light else "seg-label-dark", "middle"))
+            x += seg
+        label = f"{round(total):,} points" + ("  · wins" if i == best else "")
+        o.append(t(x + 10, y + 19, label, "b" if i == best else ""))
+    ly = 34 + len(rows) * rh + 8
+    lx = 20
+    for lvl, w, cls in WEIGHTS:
+        o += [f'<rect x="{lx}" y="{ly}" width="14" height="14" class="{cls}"/>', t(lx + 20, ly + 12, f"{lvl} ({w} per mile)", "s")]
+        lx += 170
+    return _svg(p, 900, ly + 30, "Each route's risk points, split by weather level. The lowest total wins.", "".join(o)), CSS + """
+.dg .seg-nt{fill:var(--wf-ink)!important;stroke:var(--wf-paper)!important;stroke-width:1}
+.dg .seg-sev{fill:var(--wf-warn)!important;stroke:var(--wf-paper)!important;stroke-width:1}
+.dg .seg-high{fill:var(--wf-warn)!important;fill-opacity:.45;stroke:var(--wf-paper)!important;stroke-width:1}
+.dg .seg-mod{fill:var(--wf-muted)!important;fill-opacity:.35;stroke:var(--wf-paper)!important;stroke-width:1}
+.dg text.seg-label{fill:var(--wf-paper)!important;font-size:11px;font-weight:600}
+.dg text.seg-label-dark{fill:var(--wf-ink)!important;font-size:11px;font-weight:600}
+"""
 
 
 # 7. Cache bucket ------------------------------------------------------------

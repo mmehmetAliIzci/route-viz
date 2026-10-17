@@ -361,6 +361,28 @@ describe('worstStretch', () => {
   })
 })
 
+describe('whyLine', () => {
+  const [a, b, c] = plan.routes
+  const scored = (route: NonNullable<typeof a>, risk_score: number) => ({ ...route, summary: { ...route.summary, risk_score } })
+
+  it('gives the risk points of the winner and the runner-up when risk decided it', () => {
+    const routes = [scored(a!, 459.4), scored(b!, 839.6), c!]
+    const risky = {
+      ...plan,
+      routes,
+      recommendation: { ...plan.recommendation, route_id: a!.id, runner_up_id: b!.id, decided_by: 'risk_score' },
+    }
+    expect(buildPlanView(risky).verdict.whyLine).toBe(
+      `Least dangerous of the three: 459 risk points, against 840 for ${b!.name}.`,
+    )
+  })
+
+  it('says the only route when nothing decided it', () => {
+    const only = { ...plan, recommendation: { ...plan.recommendation, decided_by: null } }
+    expect(buildPlanView(only).verdict.whyLine).toBe('The only route found.')
+  })
+})
+
 describe('tradeoffLine', () => {
   const [a, b, c] = plan.routes
   const hours = (h: number) => h * 3600
@@ -386,11 +408,11 @@ describe('tradeoffLine', () => {
     )
   })
 
-  it('falls back to average risk when the faster road adds no hazard miles', () => {
-    const slowWinner = { ...a!, duration_s: hours(10) }
-    const fast = { ...b!, duration_s: hours(8.5) }
+  it('falls back to risk points when the faster road adds no hazard miles', () => {
+    const slowWinner = { ...a!, duration_s: hours(10), summary: { ...a!.summary, risk_score: 40 } }
+    const fast = { ...b!, duration_s: hours(8.5), summary: { ...b!.summary, risk_score: 95 } }
     const view = buildPlanView({ ...plan, routes: [slowWinner, fast, { ...c!, duration_s: hours(11) }] })
-    expect(view.verdict.tradeoff).toBe(`Trade-off: ${b!.name} is 1 h 30 min faster, but scores higher average risk.`)
+    expect(view.verdict.tradeoff).toBe(`Trade-off: ${b!.name} is 1 h 30 min faster, but has more risk points (95 vs 40).`)
   })
 
   it('ignores roads less than an hour faster', () => {

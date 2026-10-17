@@ -28,6 +28,7 @@ def test_saved_trips_were_recorded_in_clear_weather_with_wind_direction(sample_i
     assert rec["decided_by"] == "duration"
     assert rec["close_call"] is False
     assert rec["reason"] == reason
+    assert all(r["summary"]["risk_score"] == 0 for r in body["routes"])
     assert "wind_dir" in body["heatmap"]["channels"]
     assert all("wind_dir_deg" in c for r in body["routes"] for c in r["checkpoints"])
 

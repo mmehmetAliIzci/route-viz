@@ -1,4 +1,4 @@
-"""Rebuild the recommendation and moderate_mi in saved plans from their stored checkpoints.
+"""Rebuild the recommendation, moderate_mi and risk_score in saved plans from their stored checkpoints.
 
 Offline: no network, no API key. Run from backend/:
 uv run python scripts/refresh_explanations.py [path ...]

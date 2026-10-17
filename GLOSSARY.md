@@ -61,19 +61,23 @@ A rule from the assessment that raises the wind level for heavy loads.
 _Avoid_: Weight rule, override
 
 **No Travel**:
-The level at which the truck should not drive through. A route with any No Travel miles is never recommended over one without.
+The level at which the truck should not drive through. Each of its miles costs 27 risk points, the most of any level.
 _Avoid_: Closed, blocked, unsafe
 
+**Risk points**:
+A route's weather cost: its owned miles at each level times that level's weight (Low 0, Moderate 1, High 3, Severe 9, No Travel 27), added up. A total, not an average. Routes within a near-tie of each other (10 points, or 5% of the higher score) are ranked by travel time.
+_Avoid_: Danger, penalty
+
 **Average risk**:
-The mile-weighted mean of a route's checkpoint levels, counting Low as 0 and No Travel as 4.
-_Avoid_: Risk score, mean level
+The mile-weighted mean of a route's checkpoint levels, counting Low as 0 and No Travel as 4. Shown, not ranked on.
+_Avoid_: Mean level
 
 **Summary**:
-A route's No Travel, Severe and High miles, its average risk, worst level and travel time.
+A route's No Travel, Severe, High and Moderate miles, its risk points, average risk, worst level and travel time.
 _Avoid_: Stats, metrics
 
 **Recommendation**:
-The route the ranking order picks, with one sentence saying which criterion beat the runner-up.
+The route with the fewest risk points, or the quickest of those near-tied with it, with one sentence saying why it beat the runner-up.
 _Avoid_: Best route, winner, safest route
 
 ## Map

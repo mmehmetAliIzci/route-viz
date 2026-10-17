@@ -680,7 +680,8 @@
     "high_mi": 0,
     "avg_risk": 0.0,
     "max_level": "low",
-    "moderate_mi": 0
+    "moderate_mi": 0,
+    "risk_score": 0.0
    }
   },
   {
@@ -1415,7 +1416,8 @@
     "high_mi": 0,
     "avg_risk": 0.0,
     "max_level": "low",
-    "moderate_mi": 0
+    "moderate_mi": 0,
+    "risk_score": 0.0
    }
   },
   {
@@ -2166,7 +2168,8 @@
     "high_mi": 0,
     "avg_risk": 0.0,
     "max_level": "low",
-    "moderate_mi": 0
+    "moderate_mi": 0,
+    "risk_score": 0.0
    }
   }
  ],

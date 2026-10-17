@@ -14,6 +14,25 @@ def lines(path, a, b):
     return "\n".join((ROOT / path).read_text().splitlines()[a - 1 : b])
 
 
+def ranking_excerpt():
+    """The weights, the near-tie rule and recommend() from ranking.py, with notes."""
+    src = (ROOT / "backend/planner/ranking.py").read_text().splitlines()
+    w0 = next(i for i, l in enumerate(src) if l.startswith("LEVEL_WEIGHTS")) - 1  # include its comment
+    w1 = next(i for i, l in enumerate(src) if l.startswith("NEAR_TIE_SHARE")) + 1
+    r0 = next(i for i, l in enumerate(src) if l.startswith("def near_tied"))
+    code = src[w0:w1] + ["", "# ..."] + src[r0:]
+
+    def at(pattern):
+        return next(i for i, l in enumerate(code, 1) if pattern in l)
+
+    weights_end = at("NEAR_TIE_POINTS") - 1
+    return "\n".join(code), [
+        {"lines": f"1-{weights_end}", "label": "The weights", "note": "Points per mile for each level, three times apart."},
+        {"lines": f"{at('NEAR_TIE_POINTS')}-{at('NEAR_TIE_SHARE')}", "label": "Close enough to call a tie", "note": "Within 10 points, or 5% of the higher score, drive time decides."},
+        {"lines": f"{at('def pick')}-{at('return min(tied')}", "label": "Picking the route", "note": "Among the routes near-tied with the lowest score, the quickest wins."},
+    ]
+
+
 def diagram(id_, caption, html, css):
     return {"type": "diagram", "id": id_, "caption": caption, "html": html, "css": css}
 
@@ -83,6 +102,7 @@ P(table("glossary", ["Word", "What it means here"], [
     ["Level", "How dangerous the weather is at a checkpoint: Low, Moderate, High, Severe or No Travel."],
     ["No Travel", "The worst level. The truck should not drive through it."],
     ["Owned miles", "The stretch of road one checkpoint speaks for (explained with a picture below)."],
+    ["Risk points", "One number for how much bad weather a route has: every mile scores by its level, added up. Fewest points wins."],
     ["Heatmap", "The coloured weather layer on the map, for any hour in the next 48 hours."],
     ["Demo weather", "A made-up storm the app can lay over any trip, so every risk level can be shown on a calm day."],
     ["TomTom", "The map company whose service provides the truck routes and drive times."],
@@ -97,7 +117,7 @@ The screenshots below are the real app, on the saved Kansas City to Denver trip 
 
 ### The answer comes first
 
-The green card answers three questions at a glance: **which road**, **when you arrive**, and **the worst thing on the way**. Here: take I-70 W / I-670 W, arrive at 12:09 AM, and expect No Travel wind for the last 67 miles into Denver. The small print explains the choice: it has the least No Travel weather of the three routes, and with a 38,000 lb load, wind over 45 mph counts as No Travel.
+The green card answers three questions at a glance: **which road**, **when you arrive**, and **the worst thing on the way**. Here: take I-70 W / I-670 W, arrive at 12:09 AM, and expect No Travel wind for the last 67 miles into Denver. The small print explains the choice, and the wind rule for this load: with 38,000 lb, wind over 45 mph counts as No Travel.
 
 Two notes can appear under the answer:
 
@@ -220,54 +240,59 @@ The thresholds and load rules above are the assignment brief's, applied exactly.
 """)
 
 # ---------- Ranking ----------
+KC_DEMO = [
+    ("I-70 W / I-670 W", "Kansas · 605 mi · 8 h 9 min", {"No Travel": 67.3, "Severe": 50, "High": 75, "Moderate": 50}),
+    ("US-36 W / US-34 W", "Small highways · 661 mi · 11 h 21 min", {"No Travel": 100, "Severe": 123.1, "High": 50, "Moderate": 75}),
+    ("I-80 W / I-76 W", "Nebraska · 684 mi · 9 h 30 min", {"No Travel": 221.1, "Severe": 50, "High": 50, "Moderate": 50}),
+]
 P("""
 ## How the best route is picked
 
-Routes are compared one question at a time, like a tie-breaker:
-
-1. Fewest miles of **No Travel** weather
-2. Fewest **Severe** miles
-3. Fewest **High** miles
-4. Lowest **average risk**
-5. Shortest **drive**
-
-The brief's order is questions 2 to 5. **Question 1 is an addition:** the brief's list does not mention No Travel at all, so read literally, a route with 100 miles of No Travel weather and no Severe miles would beat a route with a single Severe mile. Putting No Travel first prevents that.
-
-The first question where the routes differ decides, and it becomes the sentence on the card. These are the three routes for Kansas City to Denver, with the demo storm:
+Every route gets **risk points**. Each mile of road scores by the weather level of the checkpoint that speaks for it, and the points are added up over the whole route. **The route with the fewest points wins.**
 """)
-P(table("kc-den-routes", ["Route", "In plain words", "Distance", "Drive time", "No Travel miles"], [
-    ["I-70 W / I-670 W", "The direct way: west across Kansas on Interstate 70", "605 mi", "8 h 9 min", "67"],
-    ["I-80 W / I-76 W", "North first, west across Nebraska on Interstate 80, then down to Denver", "684 mi", "9 h 30 min", "221"],
-    ["US-36 W / US-34 W", "Smaller US highways in between", "661 mi", "11 h 21 min", "100"],
+P(table("risk-weights", ["Level", "Points per mile", "Same as"], [
+    ["Low", "0", ""],
+    ["Moderate", "1", ""],
+    ["High", "3", "3 Moderate miles"],
+    ["Severe", "9", "3 High miles"],
+    ["No Travel", "27", "3 Severe miles"],
 ]))
-P(diagram("ranking-ladder", "The first question already separates the two best routes: 67 against 100 miles of No Travel weather. The card says so: '33 fewer miles of No Travel weather than US-36 W / US-34 W. Saves 3 h 12 min.'", *D.ranking_ladder()))
 P("""
-On the real forecast for the same day the weather was calm on all three routes. Every weather question tied, so the drive time decided: *Same weather, 1 h 21 min faster.*
+Each level counts **three times** the one below it, so worse weather always weighs much more, but a large amount of milder weather still counts.
 
-**The trade-off note.** The order puts bad weather before time, so a route can win while being hours slower. When another road is at least an hour faster, the card says so in red, with the time saved and the extra bad weather, so the driver can make an informed choice.
+**If two routes are close**, within 10 points or 5% of each other, the shorter drive wins. On calm days every route scores 0, so the drive time decides.
 
+Here are the three routes for Kansas City to Denver under the demo storm:
 """)
+P(diagram("risk-points", "The Kansas route has the fewest risk points, so it wins. The card says why in words: '33 fewer mi of No Travel weather' than the runner-up, and it is also 3 h 12 min faster.", *D.risk_points(KC_DEMO)))
 P("""
-### What "average risk" means
+### Why points instead of a fixed order
 
-Average risk is one number for how risky a whole route is. Every mile of road gets the score of the checkpoint that speaks for it, and the scores are averaged over the route's length.
+The brief lists its preferences as an ordered list: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Applied strictly, the first difference decides and nothing after it is looked at. That gives odd results:
 """)
-P(table("risk-scores", ["Level", "Score per mile"], [["Low", "0"], ["Moderate", "1"], ["High", "2"], ["Severe", "3"], ["No Travel", "4"]]))
-P("""
-**A small example.** A 100 mile route with 60 miles of Low, 25 miles of Moderate and 15 miles of High weather: 60 × 0 + 25 × 1 + 15 × 2 = 55 points, over 100 miles, is an average risk of **0.55**. A route that is clear all the way scores 0; one that is No Travel all the way scores 4.
-
-**On the real trip.** I-70 W / I-670 W under the demo storm: 67 × 4 + 50 × 3 + 75 × 2 + 50 × 1 = 619 points over 605 miles, an average risk of **1.02**.
-
-**A quirk of averaging.** The same 25 Moderate and 15 High miles on a 200 mile route give 55 ÷ 200 = **0.28**. The bad road is the same, just spread over more miles, so longer routes look slightly better. That is why average risk only comes fourth: it decides only between routes with exactly the same No Travel, Severe and High miles.
-""")
-P(annotated("ranking-code", "backend/planner/ranking.py", lines("backend/planner/ranking.py", 66, 94), [
-    {"lines": "1-9", "label": "The questions, in order", "note": "No Travel first, then the brief's order. Numbers are rounded so tiny differences never decide."},
-    {"lines": "25-29", "label": "What decided", "note": "The first question where the winner and runner-up differ. It becomes the reason on the card."},
+P(table("strict-vs-points", ["", "Severe miles", "High miles", "Strict order picks", "Risk points"], [
+    ["Route A", "50", "130", "A, because 50 < 51", "50 × 9 + 130 × 3 = **840**"],
+    ["Route B", "51", "0", "", "51 × 9 = **459**, so **B wins**"],
 ]))
+P("""
+One extra mile of Severe weather should not outweigh 130 extra miles of High weather. Risk points keep the brief's priorities (worse weather matters more, time comes last) but let the **amount** of weather count too. They also include No Travel miles, which the brief's list leaves out.
+
+### Why a total, not an average
+
+The brief's "average risk" divides the points by the route's length. That has two problems, and the total fixes both:
+
+- **Longer routes look safer.** The same bad stretch spread over a longer route gives a lower average, so a detour full of clear road "improves" the score without avoiding any weather. A total gives a detour no discount.
+- **The brief's scale is too flat.** Average risk scores Moderate 1, High 2, Severe 3, No Travel 4, so a mile you should not drive at all counts only as much as two miles of heavy rain. Points spread the levels three times apart.
+
+The app still reports each route's average risk, but it no longer decides anything.
+
+**The trade-off note.** Bad weather still comes before time, so a route can win while being hours slower. When another road is at least an hour faster, the card says so in red, with the time saved and the extra bad weather, so the driver can make an informed choice.
+""")
+P(annotated("ranking-code", "backend/planner/ranking.py", *ranking_excerpt()))
 P("""
 ### Leaving later
 
-The rules treat No Travel as "do not drive through it", but a driver can also wait. So when the recommended route still meets High weather or worse, the app checks whether leaving **3, 6, 12 or 24 hours later** would help, and suggests the smallest delay that cuts the No Travel, Severe or High miles.
+The rules treat No Travel as "do not drive through it", but a driver can also wait. So when the recommended route still meets High weather or worse, the app checks whether leaving **3, 6, 12 or 24 hours later** would help, and suggests the smallest delay that clearly lowers its risk points (more than a near-tie).
 
 This costs nothing extra. The forecast grid already covers 48 hours, and every checkpoint keeps its distance and travel time from the start, so only the clock moves: each checkpoint is simply read again at its later ETA. No new weather request is made. Delays the forecast does not reach are skipped, and if no delay helps, the card shows nothing.
 
@@ -411,6 +436,7 @@ P(table("decisions", ["Decision", "Why"], [
     ["One lean weather grid around the routes", "About 150 to 200 points per trip keeps the free weather service usable."],
     ["Colour only the dangerous stretches", "Clear road draws nothing extra, so the map stays readable."],
     ["Map first on the phone, route running up the screen", "The map is the product; panels stay small and out of the way."],
+    ["Rank by risk points, not a strict order", "The amount of bad weather counts, so one extra Severe mile cannot outweigh 130 High miles."],
     ["Suggest leaving later, using the forecast already fetched", "Waiting is often the real answer to No Travel weather, and checking it needs no extra weather request."],
     ["Demo weather, clearly labelled", "Every risk level can be shown on any day without pretending it is a forecast."],
     ["Times in the viewer's own zone", "Departure, arrival and hazard times match the clock of the person reading them."],
@@ -427,9 +453,9 @@ These came up while building the app. They are thought through but deliberately 
 
 "Leaving later" only moves the departure. A driver can also stop on the way: drive to the last checkpoint before the bad stretch, wait at a truck stop there, then continue. The same grid could score that, since every later ETA simply moves back by the length of the wait. US truck drivers must also take a 10-hour break after 11 hours of driving, so a real version would line waits up with those required breaks instead of suggesting stops a driver cannot legally make.
 
-### A weighted score instead of a fixed order
+### Tuning the weights
 
-A weighted score (for example "a Severe mile costs 3 points, an hour of driving 5") would let a small weather difference lose to a big time saving. It was left out because the brief gives an order, not weights; every weight would be a judgment call; and "33 fewer miles of No Travel weather" is a clearer reason for a driver than "412 points against 437". The red trade-off note covers the case where the order picks a much slower road.
+The weights (1, 3, 9, 27 points per mile) are a judgment: "each level is three times as bad as the one below". With real trip outcomes, such as delays, incidents or drivers' own choices, they could be tuned to match what experienced drivers actually prefer.
 """)
 
 P("""## Running it

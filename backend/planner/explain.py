@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from planner.ranking import Criterion, Recommendation, Summary
+from planner.ranking import LEVEL_WEIGHTS, Recommendation, Summary
 from planner.rules import Cause, Level
 
 
@@ -41,12 +41,13 @@ _LEVEL_WORDS: dict[Level, str] = {
     Level.NO_TRAVEL: "No Travel",
 }
 
-# Criteria that name a hazard level, with the Summary field holding its miles.
-_LEVEL_CRITERIA: dict[Criterion, tuple[Level, str]] = {
-    "no_travel_mi": (Level.NO_TRAVEL, "no_travel_mi"),
-    "severe_mi": (Level.SEVERE, "severe_mi"),
-    "high_mi": (Level.HIGH, "high_mi"),
-}
+# The levels the risk-score sentence compares, worst first, with the Summary field holding their miles.
+_COMPARED: list[tuple[Level, str]] = [
+    (Level.NO_TRAVEL, "no_travel_mi"),
+    (Level.SEVERE, "severe_mi"),
+    (Level.HIGH, "high_mi"),
+    (Level.MODERATE, "moderate_mi"),
+]
 
 
 def zone(name: str) -> ZoneInfo:
@@ -82,11 +83,6 @@ def _mi(miles: float) -> str:
     return str(round(miles)) if round(miles) else "under 1"
 
 
-def _mi1(miles: float) -> str:
-    """Miles to 0.1 without a trailing .0."""
-    return f"{round(miles, 1):g}"
-
-
 def _minutes(delta_s: float) -> int:
     return round(delta_s / 60)
 
@@ -110,50 +106,37 @@ def _reason(
         return f"Tied with {runner.name} on every criterion.", False
 
     delta_s = best.duration_s - runner.duration_s
+    a, b = round(best.summary.risk_score), round(runner.summary.risk_score)
 
-    if rec.decided_by in _LEVEL_CRITERIA:
-        level, field = _LEVEL_CRITERIA[rec.decided_by]
-        a, b = getattr(best.summary, field), getattr(runner.summary, field)
-        if a <= 0:
-            first = next((h for h in runner.hazards if h.level == level), None)
-            what = f"{_LEVEL_WORDS[level]} weather" if first is None else _where(first, tz)
-            return f"Avoids {_mi(b)} mi of {what}.{_time_change(delta_s)}", False
-        gap = _mi(b - a)
-        gap = gap[0].upper() + gap[1:]
-        return (
-            f"{gap} fewer mi of {_LEVEL_WORDS[level]} weather than {runner.name} "
-            f"({_mi(a)} vs {_mi(b)} mi).{_time_change(delta_s)}",
-            False,
+    if rec.decided_by == "risk_score":
+        # Miles the winner saves (+) or adds (-) at each level, and the weighted points they are worth.
+        gaps = [
+            (level, getattr(runner.summary, field) - getattr(best.summary, field))
+            for level, field in _COMPARED
+        ]
+        saved = [(level, miles, miles * LEVEL_WEIGHTS[level]) for level, miles in gaps]
+        level, miles, _ = max(saved, key=lambda x: x[2])
+        text = (
+            f"Less dangerous weather than {runner.name} ({a} vs {b} risk points): "
+            f"{_mi(miles)} fewer mi of {_LEVEL_WORDS[level]} weather."
         )
-
-    if rec.decided_by == "avg_risk":
-        best_mod, runner_mod = round(best.summary.moderate_mi, 1), round(runner.summary.moderate_mi, 1)
-        if best_mod < runner_mod:
-            return (
-                f"Fewer Moderate miles ({_mi1(best_mod)} vs {_mi1(runner_mod)} mi).{_time_change(delta_s)}",
-                False,
-            )
-        if best_mod > runner_mod:
-            text = (
-                f"{best.name} scores slightly lower only because it is longer. "
-                f"It has more Moderate miles ({_mi1(best_mod)} vs {_mi1(runner_mod)} mi)."
-            )
-            return text + _speed_note(best, runner, delta_s), True
-        text = f"Same weather as {runner.name}. {best.name} scores slightly lower only because it is longer."
-        return text + _speed_note(best, runner, delta_s), True
+        cost_level, cost_miles, cost_points = min(saved, key=lambda x: x[2])
+        if cost_points < 0:
+            more = f"{_mi(-cost_miles)} more mi of {_LEVEL_WORDS[cost_level]} weather"
+            text += f" It has {more}, which counts for less."
+        return text + _time_change(delta_s), False
 
     # duration
-    if _minutes(delta_s) == 0:
-        return "Same weather, a few seconds faster.", False
-    return f"Same weather, {_duration(delta_s)} faster.", False
+    if best.summary.risk_score == runner.summary.risk_score:
+        return f"Same weather, {_faster(delta_s)}.", False
+    return f"About the same weather as {runner.name} ({a} vs {b} risk points), {_faster(delta_s)}.", True
 
 
-def _speed_note(best: RouteFacts, runner: RouteFacts, delta_s: float) -> str:
-    if _minutes(delta_s) > 0:
-        return f" {runner.name} is {_duration(delta_s)} faster."
+def _faster(delta_s: float) -> str:
+    """'20 min faster', or a seconds-level phrase when the gap rounds to 0 minutes."""
     if _minutes(delta_s) < 0:
-        return f" {best.name} is also {_duration(delta_s)} faster."
-    return ""
+        return f"{_duration(delta_s)} faster"
+    return "a few seconds faster" if delta_s < 0 else "no slower"
 
 
 def _why_not(route: RouteFacts, best: RouteFacts, tz: ZoneInfo) -> tuple[str, str | None]:

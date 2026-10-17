@@ -9,9 +9,9 @@ START = datetime(2026, 10, 16, 14, tzinfo=UTC)
 HOURS = 49
 
 
-def grid_with_wind(windy_hours: range) -> weather.Grid:
-    """A 2 x 2 grid where every node blows 60 mph (No Travel) in `windy_hours` and 5 mph otherwise."""
-    wind = [60.0 if h in windy_hours else 5.0 for h in range(HOURS)]
+def grid_with_wind(windy_hours: range, mph: float = 60.0) -> weather.Grid:
+    """A 2 x 2 grid where every node blows `mph` (60 is No Travel) in `windy_hours` and 5 mph otherwise."""
+    wind = [mph if h in windy_hours else 5.0 for h in range(HOURS)]
     series = weather.Series(
         t0=int(START.timestamp()),
         wind_mph=wind,
@@ -93,3 +93,16 @@ def test_never_reads_past_the_end_of_the_forecast() -> None:
 
 def test_grid_end_is_the_last_stamp() -> None:
     assert grid_with_wind(range(0)).end() == START + timedelta(hours=HOURS - 1)
+
+
+def test_a_near_tie_is_not_an_improvement() -> None:
+    grid = grid_with_wind(range(0, 2), mph=40.0)  # High wind for the first two hours only
+    few = [sampling.Checkpoint(mile=0, lon=-99.8, lat=38.2, eta=START, owned_mi=3)]
+    many = [sampling.Checkpoint(mile=0, lon=-99.8, lat=38.2, eta=START, owned_mi=5)]
+    now = summary_at(few, grid)
+    assert now.risk_score == 9  # 3 High miles: later is 9 points better, within the 10 point near-tie
+    assert later.leave_later(few, 3 * 3600, grid, 38_000, START, now) is None
+    now = summary_at(many, grid)
+    assert now.risk_score == 15  # 5 High miles: 15 points better is a real improvement
+    found = later.leave_later(many, 3 * 3600, grid, 38_000, START, now)
+    assert found is not None and found.shift_h == 3 and found.summary.risk_score == 0

@@ -16,8 +16,8 @@ A React + Django app that helps a truck driver pick a route by the weather the t
 
 **Two warnings the rules alone would hide.**
 
-- *Trade-off.* The assessment ranks hazard miles before time, so a road that is five hours faster can lose on a 50-mile gap in No Travel weather. When another road is at least an hour faster than the recommended one, a red alert names it, the time it saves, and the hazard miles it adds.
-- *Leave later.* The forecast grid already covers 48 hours, so the recommended route is rescored at 3, 6, 12 and 24 hours later for free. When a later departure has fewer No Travel, Severe or High miles, the card says so: "Leave 12 h later, at Sun 4:00 AM: no No Travel weather (now 67 mi)."
+- *Trade-off.* The recommendation puts weather risk before time, so a road that is five hours faster can lose on a 50-mile gap in No Travel weather. When another road is at least an hour faster than the recommended one, a red alert names it, the time it saves, and the hazard miles it adds.
+- *Leave later.* The forecast grid already covers 48 hours, so the recommended route is rescored at 3, 6, 12 and 24 hours later for free. When a later departure has a clearly lower risk score, the card says so: "Leave 12 h later, at Sun 4:00 AM: no No Travel weather (now 67 mi)."
 
 **The map.** The recommended route is drawn in the colour of each stretch's risk level, with one label at the worst checkpoint. The other routes carry a tappable pill with their time against the best one. A labelled pin marks the destination and a ring the start. On a phone the map is rotated so the trip runs up the screen (the compass button turns north up again), the layer picker is a labelled rail, and the route cards rest in a sheet at one line.
 
@@ -46,7 +46,7 @@ flowchart LR
   C --> F[Weather at each checkpoint:\nbilinear in space, linear in time]
   E --> F
   F --> G[Risk rules: worst of\nwind, rain, snow; load bands on wind]
-  G --> H[Ranking: No Travel mi, Severe mi,\nHigh mi, average risk, time]
+  G --> H[Ranking: risk points per route,\nnear-ties go to the quicker route]
   H --> I[Recommendation, trade-off,\nleave-later check]
   E --> J[Heatmap: 4 channels + wind direction,\none byte per node per hour]
 ```
@@ -55,7 +55,9 @@ flowchart LR
 2. **Checkpoints.** One every N miles from the origin, plus the destination. Each checkpoint owns half the gap to its neighbours, so a route's owned miles add up to its length.
 3. **Weather.** One grid of forecast points around the routes: the corners of every grid cell a route passes through, at the finest step that keeps it at about 200 points. The points go to Open-Meteo in parallel chunks of 50, hourly from departure to 48 hours later or the last ETA, whichever is further. A plan fetches weather once; nothing polls in the background. Checkpoints read the grid at their ETA, bilinear between the four nodes around them and linear between the two hours. Wind direction is interpolated through its components so it never turns the long way round through north.
 4. **Risk.** Each checkpoint's level is the worst of its wind, rain and snow levels from the assessment table, with the load rules applied to wind.
-5. **Recommendation.** Routes are ranked by No Travel miles first, then the assessment's order: Severe miles, High miles, average risk, travel time. The card names the criterion that decided it, adds the trade-off alert when a much faster road lost, and the leave-later line when waiting helps.
+5. **Recommendation.** Each route gets risk points: the miles each checkpoint owns, times a weight for its level, added up. The weights are Low 0, Moderate 1, High 3, Severe 9 and No Travel 27, each level three times the one below. The score is a total, not an average, so a longer detour gets no discount for its extra clear miles. The lowest score wins, unless other routes are within a near-tie of it: scores within 10 points, or within 5% of the higher score if that is more. Among near-tied routes the quickest wins. The card says which of the two decided it, adds the trade-off alert when a much faster road lost, and the leave-later line when waiting helps. Average risk is still shown, but it decides nothing.
+
+This deliberately departs from the brief's ordered list (Severe miles, then High miles, then average risk, then time, with No Travel miles compared before all of them). A strict order lets a tiny difference in one level outweigh a large difference in another: 1 extra Severe mile would beat 130 extra High miles. With weights, 130 High miles cost 390 points and 1 Severe mile costs 9, so the route with the Severe mile wins.
 
 All scoring is Python in `backend/planner/`. The frontend displays, it does not decide.
 
@@ -107,7 +109,7 @@ A plan costs one TomTom routing call, four Open-Meteo calls of about 50 location
 | Suite | Count | What it runs on |
 |---|---|---|
 | Backend `pytest` | 197 | Recorded TomTom and Open-Meteo responses in `backend/tests/fixtures/`; no network |
-| Frontend `vitest` | 174 | Pure view-model and particle tests, component tests with Testing Library, a MapLibre fake |
+| Frontend `vitest` | 178 | Pure view-model and particle tests, component tests with Testing Library, a MapLibre fake |
 
 ```bash
 cd backend && uv run pytest -q && uv run ruff check .

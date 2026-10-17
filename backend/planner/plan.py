@@ -245,6 +245,7 @@ def _route_json(r: RouteShape, checkpoints: list[dict], s: ranking.Summary) -> d
             "severe_mi": round(s.severe_mi, 1),
             "high_mi": round(s.high_mi, 1),
             "moderate_mi": round(s.moderate_mi, 1),
+            "risk_score": round(s.risk_score, 1),
             "avg_risk": round(s.avg_risk, 2),
             "max_level": _level(s.max_level),
         },

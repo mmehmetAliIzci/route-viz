@@ -35,6 +35,7 @@ const Route = z.object({
     severe_mi: z.number(),
     high_mi: z.number(),
     moderate_mi: z.number(),
+    risk_score: z.number(),
     avg_risk: z.number(),
     max_level: Level,
   }),

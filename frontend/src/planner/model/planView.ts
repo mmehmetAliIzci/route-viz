@@ -388,23 +388,17 @@ export function stretchSentence(stretch: WorstStretch | null, origin: string, de
 
 const COUNT_WORDS = ['', 'one', 'two', 'three', 'four', 'five']
 
-// How the recommended route beat the runner-up, from the criterion the ranking says decided it.
+// How the recommended route beat the runner-up, from what the ranking says decided it.
 function whyLine(plan: Plan, routes: RouteView[]): string {
   const rec = plan.recommendation
   const runner = plan.routes.find((r) => r.id === rec.runner_up_id)
   if (!runner || rec.decided_by === null) return 'The only route found.'
   const count = COUNT_WORDS[plan.routes.length] ?? String(plan.routes.length)
-  const milesAt: Record<string, [string, keyof PlanRoute['summary']]> = {
-    no_travel_mi: ['No Travel', 'no_travel_mi'],
-    severe_mi: ['Severe', 'severe_mi'],
-    high_mi: ['High', 'high_mi'],
+  if (rec.decided_by === 'risk_score') {
+    const best = plan.routes.find((r) => r.id === rec.route_id)
+    const score = Math.round(best?.summary.risk_score ?? 0)
+    return `Least dangerous of the ${count}: ${score} risk points, against ${Math.round(runner.summary.risk_score)} for ${runner.name}.`
   }
-  const byMiles = milesAt[rec.decided_by]
-  if (byMiles) {
-    const [word, key] = byMiles
-    return `Least ${word} weather of the ${count}: ${runner.name} has ${Math.round(Number(runner.summary[key]))} mi.`
-  }
-  if (rec.decided_by === 'avg_risk') return `Lowest average risk of the ${count}.`
   const faster = formatDuration(Math.abs(rec.time_vs_runner_up_s))
   const sameWeather = routes.find((r) => r.id === runner.id)?.stretchShort === routes.find((r) => r.isRecommended)?.stretchShort
   return `${sameWeather ? 'Same weather as' : 'Beats'} ${runner.name}, ${faster} faster.`
@@ -444,7 +438,7 @@ export function tradeoffLine(plan: Plan, routes: RouteView[]): string | null {
       return `Trade-off: ${faster.name} is ${saved} faster, but has ${Math.round(more)} more mi of ${what} (${Math.round(Number(faster.summary[key]))} vs ${Math.round(Number(best.summary[key]))}).`
     }
   }
-  return `Trade-off: ${faster.name} is ${saved} faster, but scores higher average risk.`
+  return `Trade-off: ${faster.name} is ${saved} faster, but has more risk points (${Math.round(faster.summary.risk_score)} vs ${Math.round(best.summary.risk_score)}).`
 }
 
 // "Leave 6 h later, at Sat 10:00 PM: 50 mi of No Travel weather instead of 100." or

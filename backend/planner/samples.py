@@ -36,7 +36,7 @@ def get(sample_id: str) -> dict[str, Any] | None:
 
 
 def refresh(body: dict[str, Any], tz: ZoneInfo | None = None) -> dict[str, Any]:
-    """Set routes[].summary.moderate_mi and recommendation from the stored checkpoints.
+    """Set routes[].summary.moderate_mi and risk_score, and the recommendation, from the stored checkpoints.
 
     The text is written in `tz`, the origin's zone when None. Changes `body` and returns it.
     Raises ValueError when the recommended route would change.
@@ -64,6 +64,7 @@ def refresh(body: dict[str, Any], tz: ZoneInfo | None = None) -> dict[str, Any]:
 
     for route, summary in zip(body["routes"], summaries, strict=True):
         route["summary"]["moderate_mi"] = round(summary.moderate_mi, 1)
+        route["summary"]["risk_score"] = round(summary.risk_score, 1)
     body["recommendation"] = story
     return body
 
