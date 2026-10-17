@@ -108,7 +108,7 @@ def time_aware():
     # naive check along hour 0
     o += [line(mx(380), y0, mx(480), y0, "lna")]
     o += [line(mx(430) - 6, y0 - 6, mx(430) + 6, y0 + 6, "lna"), line(mx(430) - 6, y0 + 6, mx(430) + 6, y0 - 6, "lna")]
-    o += [t(mx(340), y0 - 28, "checking “now” flags", "hi", "end"), t(mx(340), y0 - 13, "mile 430 as stormy", "hi", "end")]
+    o += [t(mx(340), y0 - 28, "checking the weather now", "hi", "end"), t(mx(340), y0 - 13, "flags mile 430 as stormy", "hi", "end")]
     # truck line, ETA from TomTom
     end_h = 8.3
     o += [line(mx(0), hy(0), mx(600), hy(end_h), "ln")]
@@ -147,8 +147,8 @@ def owned_miles():
         xa, xb = mx(a) + 3, mx(b) - 3
         o += [f'<path d="M{xa:.1f},134 L{xa:.1f},144 L{xb:.1f},144 L{xb:.1f},134" class="{cls}"/>']
         o += [t((xa + xb) / 2, 164, f"{b - a:g} mi", "b" if acc else "", "middle")]
-    o += [t(mx(25), 186, "the checkpoint at mile 25 speaks for miles 12.5 to 37.5", "s", "middle"), t(x1, 186, "12.5 + 25 + 17.5 + 5 = 60 mi", "s", "end")]
-    o += [t(x0 - 6, 128, "road each", "s", "end"), t(x0 - 6, 142, "checkpoint", "s", "end"), t(x0 - 6, 156, "speaks for", "s", "end")]
+    o += [t(mx(25), 186, "the checkpoint at mile 25 covers miles 12.5 to 37.5", "s", "middle"), t(x1, 186, "12.5 + 25 + 17.5 + 5 = 60 mi", "s", "end")]
+    o += [t(x0 - 6, 128, "road each", "s", "end"), t(x0 - 6, 142, "checkpoint", "s", "end"), t(x0 - 6, 156, "covers", "s", "end")]
     return _svg(p, 800, 200, "Checkpoints sit every 25 miles plus the destination; each owns half the gap to its neighbours, so owned miles add up to the route length.", "".join(o)), CSS
 
 
