@@ -1,4 +1,4 @@
-import { Pencil } from 'lucide-react'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { selectedRouteName } from './model/planView'
@@ -54,6 +54,9 @@ function ResultsHeader({ view, onEdit, settings }: PlannerLayoutProps) {
   if (!view) return null
   return (
     <div className="flex items-center gap-2">
+      <Button variant="secondary" size="icon" className="size-12 shrink-0 rounded-full" aria-label="Back to the trip" onClick={onEdit}>
+        <ArrowLeft className="size-6" />
+      </Button>
       <p className="min-w-0 flex-1 text-base font-medium break-words">{view.tripLabel}</p>
       <Button variant="outline" className="h-12 px-4 text-base" onClick={onEdit}>
         <Pencil />

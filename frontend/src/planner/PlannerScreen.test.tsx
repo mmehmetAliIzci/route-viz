@@ -196,6 +196,14 @@ describe('PlannerScreen on desktop', () => {
     expect(await screen.findByTestId('map')).toBeInTheDocument()
   })
 
+  it('has a back button next to the trip that returns to the form', async () => {
+    renderScreen()
+    await userEvent.click(await screen.findByRole('button', { name: savedName }))
+    await screen.findByRole('heading', { name: /^Take / })
+    await userEvent.click(screen.getByRole('button', { name: 'Back to the trip' }))
+    expect(await screen.findByRole('heading', { name: 'Where to?' })).toBeInTheDocument()
+  })
+
   it('shows the verdict and routes in the panel without a Show on map button', async () => {
     renderScreen()
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
