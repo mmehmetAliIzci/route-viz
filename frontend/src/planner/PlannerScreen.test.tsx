@@ -81,10 +81,22 @@ describe('PlannerScreen on a phone', () => {
     await screen.findByTestId('map')
     expect(screen.getAllByText(/Kansas City, MO.*Denver, CO · 38,000 lb/).length).toBeGreaterThan(0)
     await userEvent.click(screen.getByRole('button', { name: 'Edit trip' }))
-    expect(screen.getByRole('heading', { name: 'Where to?' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Where to?' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('heading', { name: 'Where to?' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /^Take / })).toBeInTheDocument()
+  })
+
+  it('returns to the form on browser back and to the plan on forward', async () => {
+    renderScreen()
+    await userEvent.click(await screen.findByRole('button', { name: savedName }))
+    await screen.findByTestId('map')
+    expect(window.history.state).toEqual({ planner: 'plan' })
+    window.history.back()
+    expect(await screen.findByRole('heading', { name: 'Where to?' })).toBeInTheDocument()
+    window.history.forward()
+    expect(await screen.findByRole('heading', { name: /^Take / })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Where to?' })).not.toBeInTheDocument()
   })
 
   it('keeps the top bar reachable while the sheet is open', async () => {

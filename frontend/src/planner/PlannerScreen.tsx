@@ -10,6 +10,7 @@ import { SavedTrips } from './SavedTrips'
 import { SettingsSheet, type Spacing } from './SettingsSheet'
 import { TripForm } from './TripForm'
 import { useMediaQuery } from './useMediaQuery'
+import { usePlanHistory } from './usePlanHistory'
 import type { LayerChoice, WeatherControlsProps } from './WeatherControls'
 
 // MapLibre is most of the bundle; load it after the form has rendered.
@@ -56,6 +57,8 @@ export function PlannerScreen() {
   const view = shown?.view ?? null
   const field = shown?.field ?? null
   const screen: PlannerScreenState = view ? 'ready' : plan.isPending ? 'planning' : plan.isError ? 'error' : 'idle'
+  // Browser back from a plan reopens the form; forward brings the plan back.
+  const history = usePlanHistory(screen === 'ready' && !editing, (showingPlan) => setEditing(!showingPlan))
   const selectedId = pickedId ?? view?.verdict.routeId ?? null
   const heatmap = useMemo(
     () => (field && layer !== 'off' ? { field, kind: layer, hour } : null),
@@ -111,7 +114,7 @@ export function PlannerScreen() {
     onSelectRoute: setPickedId,
     replanning: view !== null && plan.isPending,
     editing,
-    onEdit: () => setEditing(true),
+    onEdit: history.back,
     onCancelEdit: () => setEditing(false),
     map: (
       <Suspense fallback={<div className="h-full w-full bg-muted" aria-hidden />}>
