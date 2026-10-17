@@ -10,12 +10,15 @@ const plan = parsePlan(fixture)
 const view = buildPlanView(plan)
 
 describe('VerdictCard', () => {
-  it('shows the headline and the reason', () => {
+  it('shows the headline, the trip facts, what the driver will hit, and why this route', () => {
     render(<VerdictCard plan={view} />)
     expect(screen.getByRole('heading', { name: view.verdict.headline })).toBeInTheDocument()
-    expect(screen.getByText(plan.recommendation.reason)).toBeInTheDocument()
     expect(screen.getByText('Best for your load')).toBeInTheDocument()
-    expect(screen.getByText(`Arrive ${view.verdict.arrivalLabel}`)).toBeInTheDocument()
+    expect(
+      screen.getByText(`${view.verdict.durationLabel} · Arrive ${view.verdict.arrivalLabel} · ${view.verdict.distanceLabel}`),
+    ).toBeInTheDocument()
+    expect(screen.getByText(view.verdict.stretchLine)).toBeInTheDocument()
+    expect(screen.getByText(view.verdict.whyLine)).toBeInTheDocument()
   })
 
   it('shows Show on map only when a handler is given', async () => {
@@ -62,17 +65,15 @@ describe('RouteRows', () => {
     expect(screen.getAllByRole('button')).toHaveLength(view.routes.length - 1)
   })
 
-  it('shows the hazard in words on a row, not the arrival sentence', () => {
-    const hazard = 'Moderate rain at mile 175 around 5:23 AM.'
-    const withHazard = buildPlanView({
-      ...plan,
-      recommendation: {
-        ...plan.recommendation,
-        why_not: plan.recommendation.why_not.map((w, i) => (i === 0 ? { ...w, hazard } : w)),
-      },
-    })
+  it('shows each route\'s worst stretch on its row, not the arrival sentence', () => {
+    const [best, second, ...rest] = plan.routes
+    const stormy = {
+      ...second!,
+      checkpoints: second!.checkpoints.map((c, i) => (i === 3 ? { ...c, level: 'moderate' as const, cause: 'rain' as const } : c)),
+    }
+    const withHazard = buildPlanView({ ...plan, routes: [best!, stormy, ...rest] })
     const { container } = render(<RouteRows plan={withHazard} selectedId={0} onSelect={vi.fn()} />)
-    expect(screen.getByText(hazard)).toBeInTheDocument()
+    expect(screen.getByText(`Moderate rain, ${plan.trip.spacing_mi} mi`)).toBeInTheDocument()
     expect(screen.getByText('Clear all the way')).toBeInTheDocument()
     expect(container).not.toHaveTextContent('Arrives')
   })

@@ -125,7 +125,7 @@ describe('PlannerScreen on a phone', () => {
   })
 
   it('asks for demo weather again for the same trip and shows its layer', async () => {
-    vi.mocked(planApi.getSample).mockImplementation(async (_id, demo) => (demo ? { ...plan, demo } : plan))
+    vi.mocked(planApi.getSample).mockImplementation(async (_id, demo) => (demo?.length ? { ...plan, demo } : plan))
     renderScreen()
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     await screen.findByTestId('map')
@@ -133,20 +133,24 @@ describe('PlannerScreen on a phone', () => {
     expect(within(layerGroup).getByRole('radio', { name: 'Risk' })).toBeChecked()
     expect(screen.queryByText(demoLine)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Settings' })) // demo weather lives in Settings
-    const demoGroup = await screen.findByRole('radiogroup', { name: 'Demo weather' })
+    const demoGroup = await screen.findByRole('group', { name: 'Demo weather' })
 
-    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Wind' }))
-    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', 'wind')
+    await userEvent.click(within(demoGroup).getByRole('button', { name: 'Wind' }))
+    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', ['wind'])
     expect(await screen.findByText(demoLine)).toBeInTheDocument()
     await userEvent.keyboard('{Escape}') // the open sheet hides the map controls from assistive tech
     expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked()
 
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    await userEvent.click(within(await screen.findByRole('radiogroup', { name: 'Demo weather' })).getByRole('radio', { name: 'Off' }))
-    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', undefined)
+    const reopened = await screen.findByRole('group', { name: 'Demo weather' })
+    await userEvent.click(within(reopened).getByRole('button', { name: 'Rain' })) // a second storm joins the first
+    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', ['wind', 'rain'])
+    await userEvent.click(within(reopened).getByRole('button', { name: 'Rain' }))
+    await userEvent.click(within(reopened).getByRole('button', { name: 'Wind' }))
+    expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', [])
     await waitFor(() => expect(screen.queryByText(demoLine)).not.toBeInTheDocument())
     await userEvent.keyboard('{Escape}')
-    expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked() // turning demo off keeps the layer
+    expect(within(layerGroup).getByRole('radio', { name: 'Rain' })).toBeChecked() // removing storms keeps the last layer shown
   })
 
   it('locks the demo switch while a new plan loads', async () => {
@@ -155,9 +159,9 @@ describe('PlannerScreen on a phone', () => {
     await screen.findByTestId('map')
     vi.mocked(planApi.getSample).mockReturnValue(new Promise(() => {}))
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    const demoGroup = await screen.findByRole('radiogroup', { name: 'Demo weather' })
-    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Rain' }))
-    expect(within(demoGroup).getByRole('radio', { name: 'Snow' })).toBeDisabled()
+    const demoGroup = await screen.findByRole('group', { name: 'Demo weather' })
+    await userEvent.click(within(demoGroup).getByRole('button', { name: 'Rain' }))
+    expect(within(demoGroup).getByRole('button', { name: 'Snow' })).toBeDisabled()
   })
 
   it('shows an error and keeps the saved trips when planning fails', async () => {

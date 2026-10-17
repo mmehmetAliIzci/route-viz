@@ -131,7 +131,7 @@ def kc_den_wind() -> dict:
 
 
 def test_demo_plan_uses_synthetic_weather_without_open_meteo(kc_den: dict, kc_den_wind: dict) -> None:
-    assert kc_den_wind["demo"] == "wind"
+    assert kc_den_wind["demo"] == ["wind"]
     assert kc_den_wind["weather"] == {
         "model": "demo",
         "source": "Demo weather (synthetic, not a forecast)",

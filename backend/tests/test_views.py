@@ -183,8 +183,9 @@ def test_saved_trip_rejects_an_unknown_zone(client: Client) -> None:
 
 def test_demo_is_passed_to_the_plan(client: Client, builds: list) -> None:
     assert post(client, body(demo="snow")).status_code == 200
+    assert post(client, body(demo="rain,wind")).status_code == 200  # any order in, SCENARIOS order out
     assert post(client, body()).status_code == 200
-    assert [b[2] for b in builds] == ["snow", None]
+    assert [b[2] for b in builds] == [("snow",), ("wind", "rain"), None]
 
 
 def test_unknown_demo_is_rejected(client: Client, builds: list) -> None:
@@ -200,7 +201,8 @@ def test_saved_trip_with_demo_weather(client: Client) -> None:
     resp = client.get("/api/samples/kansas-city-denver?demo=wind&tz=America/Denver")
     assert resp.status_code == 200
     wind = resp.json()
-    assert wind["demo"] == "wind"
+    assert wind["demo"] == ["wind"]
+    assert client.get("/api/samples/kansas-city-denver?demo=wind,snow").json()["demo"] == ["wind", "snow"]
     assert wind["weather"]["model"] == "demo"
     assert wind["trip"]["viewer_tz"] == "America/Denver"
     assert wind["sample"] == saved["sample"]
@@ -214,7 +216,7 @@ def test_saved_trip_rejects_an_unknown_demo(client: Client) -> None:
     assert resp.status_code == 400
     assert resp.json() == {
         "error": "invalid_demo",
-        "message": "Unknown demo weather. Use one of: wind, rain, snow.",
+        "message": "Unknown demo weather. Use any of: wind, rain, snow, comma-separated.",
     }
     assert (
         client.get("/api/samples/kansas-city-denver?demo=wind&tz=Mars/Olympus").json()["error"]

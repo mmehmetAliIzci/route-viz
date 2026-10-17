@@ -7,7 +7,7 @@ import { PlannerDesktop } from './PlannerDesktop'
 import type { PlannerScreenState } from './plannerLayout'
 import { PHONE_PEEK_PX, PlannerPhone } from './PlannerPhone'
 import { SavedTrips } from './SavedTrips'
-import { SettingsSheet, type DemoChoice, type Spacing } from './SettingsSheet'
+import { SettingsSheet, type Spacing } from './SettingsSheet'
 import { TripForm } from './TripForm'
 import { useMediaQuery } from './useMediaQuery'
 import type { LayerChoice, WeatherControlsProps } from './WeatherControls'
@@ -21,7 +21,7 @@ const PHONE_FIT_PADDING = { top: 72, bottom: PHONE_PEEK_PX + 12 + 136 } // card:
 type PlanRequest = { kind: 'live'; trip: TripInput } | { kind: 'saved'; sampleId: string }
 type ShownPlan = { view: PlanView; field: HeatmapField }
 
-type PlanJob = { request: PlanRequest; demo: DemoScenario | undefined }
+type PlanJob = { request: PlanRequest; demo: DemoScenario[] }
 
 async function requestPlan({ request, demo }: PlanJob): Promise<ShownPlan> {
   const plan = request.kind === 'live' ? await postPlan(request.trip, demo) : await getSample(request.sampleId, demo)
@@ -38,7 +38,7 @@ export function PlannerScreen() {
   const [hour, setHour] = useState(0)
   const [layer, setLayer] = useState<LayerChoice>('risk')
   const [spacingMi, setSpacingMi] = useState<Spacing>(25)
-  const [demo, setDemo] = useState<DemoChoice>('off')
+  const [demo, setDemo] = useState<DemoScenario[]>([]) // demo storms on; empty is the real forecast
   const [lastRequest, setLastRequest] = useState<PlanRequest | null>(null) // what the toggle re-asks
 
   const plan = useMutation({
@@ -50,7 +50,7 @@ export function PlannerScreen() {
       setEditing(false)
     },
     // The plan on screen did not change, so the switch goes back to what that plan used.
-    onError: () => setDemo(shown?.view.demo ?? 'off'),
+    onError: () => setDemo(shown?.view.demo ?? []),
   })
 
   const view = shown?.view ?? null
@@ -67,9 +67,9 @@ export function PlannerScreen() {
   const [routeUp, setRouteUp] = useState(!isDesktop)
   const fitPadding = isDesktop ? undefined : PHONE_FIT_PADDING
 
-  function request(next: PlanRequest, scenario: DemoChoice = demo) {
+  function request(next: PlanRequest, storms: DemoScenario[] = demo) {
     setLastRequest(next)
-    plan.mutate({ request: next, demo: scenario === 'off' ? undefined : scenario })
+    plan.mutate({ request: next, demo: storms })
   }
 
   function submit(input: TripInput) {
@@ -83,10 +83,11 @@ export function PlannerScreen() {
     request({ kind: 'saved', sampleId })
   }
 
-  // Picking a storm also shows its layer; turning demo off leaves the layer where the driver put it.
-  function chooseDemo(next: DemoChoice) {
+  // Adding a storm also shows its layer; removing one leaves the layer where the driver put it.
+  function chooseDemo(next: DemoScenario[]) {
+    const added = next.find((s) => !demo.includes(s))
     setDemo(next)
-    if (next !== 'off') setLayer(next)
+    if (added) setLayer(added)
     if (lastRequest && view) request(lastRequest, next)
   }
 

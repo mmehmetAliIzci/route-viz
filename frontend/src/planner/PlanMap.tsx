@@ -15,13 +15,15 @@ type Props = {
 }
 
 // One MapLibre map for the session. The lifecycle lives in useMapLibre; the wind particles
-// are a canvas over the map, shown with the Wind layer when the plan has wind direction.
+// are a canvas over the map, shown with the Wind, Rain and Snow layers when the plan has wind direction.
 export function PlanMap({ plan, selectedId, onSelectRoute, heatmap, fitPadding = DEFAULT_FIT_PADDING, bearing = 0 }: Props) {
   const theme = useResolvedTheme()
   const { container, map } = useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding, theme, bearing })
   const wind = useMemo<WindDisplay | null>(
     () =>
-      heatmap?.kind === 'wind' && heatmap.field.windVectors ? { field: heatmap.field, hour: heatmap.hour } : null,
+      heatmap && heatmap.kind !== 'risk' && heatmap.field.windVectors
+        ? { field: heatmap.field, hour: heatmap.hour, kind: heatmap.kind }
+        : null,
     [heatmap],
   )
   const particles = useWindParticles(map, wind, theme)

@@ -1,4 +1,4 @@
-"""HTTP API: POST /api/plan, GET /api/geocode and saved trips (optionally ?demo=wind|rain|snow).
+"""HTTP API: POST /api/plan, GET /api/geocode and saved trips (optionally ?demo=wind,rain).
 
 Errors are {"error": code, "message": text}.
 """
@@ -42,9 +42,16 @@ class TripIn(serializers.Serializer):
     load_lb = serializers.IntegerField(min_value=0, max_value=80_000)
     spacing_mi = serializers.ChoiceField(choices=[10, 25, 50])
     viewer_tz = serializers.CharField(required=False, default="UTC", max_length=64)
-    demo = serializers.ChoiceField(
-        choices=list(demo.SCENARIOS), required=False, allow_null=True, default=None
-    )
+    # "wind", or several at once as "wind,rain"
+    demo = serializers.CharField(required=False, allow_null=True, default=None, max_length=32)
+
+    def validate_demo(self, value: str | None) -> "demo.Scenarios | None":  # quoted: `demo` is the field here
+        if value is None:
+            return None
+        try:
+            return demo.parse(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from None
 
     def validate_viewer_tz(self, value: str) -> str:
         try:
@@ -166,16 +173,16 @@ def sample_view(request: Request, sample_id: str) -> Response:
     if body is None:
         return error("sample_not_found", "There is no saved trip with this id.", status.HTTP_404_NOT_FOUND)
     tz = request.query_params.get("tz")
-    scenario = request.query_params.get("demo")
-    if scenario is not None and scenario not in demo.SCENARIOS:
-        return error(
-            "invalid_demo",
-            f"Unknown demo weather. Use one of: {', '.join(demo.SCENARIOS)}.",
-            status.HTTP_400_BAD_REQUEST,
-        )
+    requested = request.query_params.get("demo")
+    scenarios: demo.Scenarios | None = None
+    if requested is not None:
+        try:
+            scenarios = demo.parse(requested)
+        except ValueError as exc:
+            return error("invalid_demo", str(exc), status.HTTP_400_BAD_REQUEST)
     try:
-        if scenario is not None:
-            return Response(samples.with_demo(body, scenario, tz))
+        if scenarios is not None:
+            return Response(samples.with_demo(body, scenarios, tz))
         return Response(samples.in_zone(body, tz))
     except ValueError as exc:
         return error("invalid_tz", str(exc), status.HTTP_400_BAD_REQUEST)

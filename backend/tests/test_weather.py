@@ -208,3 +208,21 @@ def test_grid_direction_is_bilinear_through_north_and_none_when_a_corner_lacks_i
     g = weather.Grid(west=0, south=0, step=1, nx=2, ny=2, start=T0, series=nodes)
     assert g.at(0.5, 0.5, T0).dir_deg is None
     assert not g.has_direction
+
+
+def test_locations_go_out_in_parallel_chunks_and_come_back_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    hourly = {k: [0] * 2 for k in ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall")}
+    hourly["time"] = [0, 3600]
+    requests: list[list[str]] = []
+
+    def fake_get(provider: str, url: str, params: dict, deadline: object = None) -> list[dict]:
+        lats = params["latitude"].split(",")
+        requests.append(lats)
+        # Each body carries its latitude in the wind column, so order can be checked afterwards.
+        return [{"hourly": {**hourly, "wind_speed_10m": [float(lat)] * 2}} for lat in lats]
+
+    monkeypatch.setattr(http, "get_json", fake_get)
+    where = [(-95.0, 30.0 + n * 0.01) for n in range(weather.CHUNK_LOCATIONS * 2 + 7)]
+    series = weather.fetch_series(where, T0, T0 + timedelta(hours=1))
+    assert [len(r) for r in requests] == [weather.CHUNK_LOCATIONS, weather.CHUNK_LOCATIONS, 7]
+    assert [s.wind_mph[0] for s in series] == pytest.approx([lat * weather.MPH_PER_KMH for _, lat in where])

@@ -79,15 +79,16 @@ def in_zone(body: dict[str, Any], tz_name: str | None) -> dict[str, Any]:
     return out
 
 
-def with_demo(body: dict[str, Any], scenario: demo.Scenario, tz_name: str | None = None) -> dict[str, Any]:
+def with_demo(
+    body: dict[str, Any], scenario: demo.Scenario | demo.Scenarios, tz_name: str | None = None
+) -> dict[str, Any]:
     """A copy of a saved plan rescored against demo weather, explained in `tz_name` (origin's when None).
 
     Routes, geometry and checkpoint positions and ETAs stay as stored; levels, summaries,
     recommendation, weather and heatmap come from the synthetic front. Sets trip.viewer_tz
     and demo. Raises ValueError for an unknown zone or scenario.
     """
-    if scenario not in demo.SCENARIOS:
-        raise ValueError(f"unknown demo scenario: {scenario}")
+    scenarios = demo.normalize(scenario)
     name = tz_name or body["trip"]["origin_tz"]
     explain.zone(name)
     t = body["trip"]
@@ -101,11 +102,11 @@ def with_demo(body: dict[str, Any], scenario: demo.Scenario, tz_name: str | None
     )
     shapes = [_shape(route) for route in body["routes"]]
     lay = weather.layout([s.geometry for s in shapes])
-    grid = demo.grid(lay, departure, plan.HEATMAP_HOURS, scenario)
+    grid = demo.grid(lay, departure, plan.HEATMAP_HOURS, scenarios)
     out = deepcopy(body)
-    out.update(plan.score(trip, shapes, grid, name, scenario))
+    out.update(plan.score(trip, shapes, grid, name, scenarios))
     out["trip"]["viewer_tz"] = name
-    out["demo"] = scenario
+    out["demo"] = list(scenarios)
     return out
 
 

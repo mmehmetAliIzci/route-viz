@@ -11,13 +11,13 @@ import { applyTheme, readThemeChoice, saveThemeChoice, type ThemeChoice } from '
 const SPACINGS = [10, 25, 50] as const
 export type Spacing = (typeof SPACINGS)[number]
 
-export type DemoChoice = DemoScenario | 'off'
-const DEMO_CHOICES: { value: DemoChoice; label: string }[] = [
-  { value: 'off', label: 'Off' },
+// Demo storms ride one front; any mix can be on at once, and none means the real forecast.
+const DEMO_CHOICES: { value: DemoScenario; label: string }[] = [
   { value: 'wind', label: 'Wind' },
   { value: 'rain', label: 'Rain' },
   { value: 'snow', label: 'Snow' },
 ]
+const DEMO_ORDER: DemoScenario[] = DEMO_CHOICES.map((c) => c.value)
 
 const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -28,8 +28,8 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
 type Props = {
   spacingMi: Spacing
   onSpacingChange: (spacing: Spacing) => void
-  demo: DemoChoice
-  onDemoChange: (demo: DemoChoice) => void
+  demo: DemoScenario[] // the storms on; empty means the real forecast
+  onDemoChange: (demo: DemoScenario[]) => void
   demoDisabled?: boolean // a plan is loading; a new demo choice would race it
   triggerClassName?: string // lets a layout give the gear a background, e.g. over the map
 }
@@ -89,17 +89,14 @@ export function SettingsSheet({ spacingMi, onSpacingChange, demo, onDemoChange, 
               Demo weather
             </Label>
             <ToggleGroup
-              type="single"
+              type="multiple"
               variant="outline"
-              role="radiogroup"
+              role="group"
               aria-labelledby="settings-demo-label"
               className="w-full"
               value={demo}
               disabled={demoDisabled}
-              onValueChange={(v) => {
-                const next = DEMO_CHOICES.find((c) => c.value === v)
-                if (next) onDemoChange(next.value)
-              }}
+              onValueChange={(values) => onDemoChange(DEMO_ORDER.filter((v) => values.includes(v)))}
             >
               {DEMO_CHOICES.map((c) => (
                 <ToggleGroupItem key={c.value} value={c.value} className={chipClass}>
@@ -108,7 +105,8 @@ export function SettingsSheet({ spacingMi, onSpacingChange, demo, onDemoChange, 
               ))}
             </ToggleGroup>
             <p className="text-sm text-muted-foreground">
-              A synthetic storm sweeping the corridor, so every risk level shows on any day. Not a forecast.
+              Synthetic storms sweeping the corridor, so every risk level shows on any day. Pick several to see
+              how they combine. None means the real forecast.
             </p>
           </div>
           <div className="grid gap-2">

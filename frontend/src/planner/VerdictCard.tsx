@@ -13,7 +13,8 @@ type Props = {
 
 const headlineClass = 'font-display min-w-0 text-left text-[38px] leading-[1.05] font-bold break-words'
 
-// The answer first: which route to take, when it arrives, and why.
+// The answer first: which route, what the driver will hit on it and when, how long it takes,
+// and in small print why it beat the others.
 export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapRouteName }: Props) {
   const { verdict } = plan
   return (
@@ -37,8 +38,17 @@ export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapR
           <span className={headlineClass}>{verdict.headline}</span>
         )}
       </h2>
-      <p className="text-base font-semibold">Arrive {verdict.arrivalLabel}</p>
-      <p className="text-base break-words">{verdict.reason}</p>
+      <p className="text-base font-semibold">
+        {verdict.durationLabel} · Arrive {verdict.arrivalLabel} · {verdict.distanceLabel}
+      </p>
+      <p className="flex items-start gap-2 text-base break-words">
+        <StretchDot plan={plan} />
+        <span className="min-w-0">{verdict.stretchLine}</span>
+      </p>
+      <p className="text-sm break-words opacity-85">
+        {verdict.whyLine}
+        {verdict.loadNote ? ` ${verdict.loadNote}` : ''}
+      </p>
       {onSelect && !selected && mapRouteName && <p className="text-sm">Map shows {mapRouteName}</p>}
       {onShowOnMap && (
         <Button
@@ -57,15 +67,33 @@ export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapR
 // The verdict in one line, for the phone sheet at rest. Tapping it opens the cards.
 export function VerdictLine({ plan, onClick }: { plan: PlanView; onClick: () => void }) {
   const { verdict } = plan
+  const best = plan.routes.find((r) => r.id === verdict.routeId)
   return (
     <button type="button" onClick={onClick} className="flex w-full items-center gap-2 text-left" aria-label="Show routes">
       <span className="grid min-w-0 flex-1 gap-0.5">
         <span className="truncate text-base font-semibold">{verdict.headline}</span>
-        <span className="truncate text-xs text-muted-foreground">
-          Arrive {verdict.arrivalLabel} · {verdict.reason}
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="truncate">
+            {verdict.durationLabel} · Arrive {verdict.arrivalLabel} ·
+          </span>
+          <StretchDot plan={plan} small />
+          <span className="truncate">{best?.stretchShort}</span>
         </span>
       </span>
       <ChevronUp className="size-5 shrink-0 text-muted-foreground" aria-hidden />
     </button>
+  )
+}
+
+// A dot in the colour of the worst stretch, so the level reads before the words do.
+function StretchDot({ plan, small = false }: { plan: PlanView; small?: boolean }) {
+  const level = plan.verdict.stretch?.level
+  if (!level) return null
+  return (
+    <span
+      className={small ? 'size-2 shrink-0 rounded-full' : 'mt-1.5 size-2.5 shrink-0 rounded-full ring-2 ring-white/70'}
+      style={{ background: level.fill }}
+      aria-hidden
+    />
   )
 }

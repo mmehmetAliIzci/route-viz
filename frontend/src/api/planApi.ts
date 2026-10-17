@@ -52,7 +52,7 @@ export type SampleInfo = z.infer<typeof SampleInfo>
 const Plan = z
   .object({
     sample: SampleInfo.optional(), // present on saved trips only
-    demo: DemoScenario.optional(), // present when the weather is synthetic demo weather, not a forecast
+    demo: z.array(DemoScenario).min(1).optional(), // present when the weather is synthetic demo weather, not a forecast
     trip: z.object({
       origin: Place,
       destination: Place,
@@ -147,12 +147,13 @@ export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-// `demo` asks for synthetic demo weather instead of the forecast; omit it for a real plan.
-export async function postPlan(trip: TripInput, demo?: DemoScenario, signal?: AbortSignal): Promise<Plan> {
+// `demo` asks for synthetic demo weather (one or more storms on one front) instead of the forecast;
+// omit it or pass an empty list for a real plan.
+export async function postPlan(trip: TripInput, demo?: DemoScenario[], signal?: AbortSignal): Promise<Plan> {
   const resp = await fetch('/api/plan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...trip, viewer_tz: browserTimeZone(), ...(demo ? { demo } : {}) }),
+    body: JSON.stringify({ ...trip, viewer_tz: browserTimeZone(), ...(demo?.length ? { demo: demo.join(',') } : {}) }),
     signal,
   })
   return parse(Plan, await readJson(resp))
@@ -168,9 +169,9 @@ export async function listSamples(signal?: AbortSignal): Promise<SampleInfo[]> {
   return parse(z.object({ samples: z.array(SampleInfo) }), await readJson(resp)).samples
 }
 
-export async function getSample(id: string, demo?: DemoScenario): Promise<Plan> {
+export async function getSample(id: string, demo?: DemoScenario[]): Promise<Plan> {
   const params = new URLSearchParams({ tz: browserTimeZone() })
-  if (demo) params.set('demo', demo)
+  if (demo?.length) params.set('demo', demo.join(','))
   const resp = await fetch(`/api/samples/${encodeURIComponent(id)}?${params}`)
   return parse(Plan, await readJson(resp))
 }

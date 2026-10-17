@@ -30,6 +30,7 @@ export type CheckpointView = {
   id: string
   lon: number
   lat: number
+  mile: number // from the origin
   mileLabel: string
   etaLabel: string // "Fri, 10:00 PM CDT"
   etaShort: string // "10:00 PM"
@@ -46,7 +47,8 @@ export type RouteView = {
   isRecommended: boolean
   isFastest: boolean
   vsRecommended: VsRecommended | null // null on the recommended route
-  hazardLine: string | null // the worst hazard in words, or "Clear all the way"; null on the recommended route
+  stretch: WorstStretch | null // the worst stretch of road, null when nothing is above Low
+  stretchShort: string // "No travel wind, 67 mi" or "Clear all the way"
   distanceLabel: string
   durationLabel: string
   arrivalLabel: string
@@ -59,9 +61,27 @@ export type RouteView = {
 export type Verdict = {
   routeId: number
   headline: string
-  reason: string
   closeCall: boolean
-  arrivalLabel: string
+  durationLabel: string // "8 h 9 min"
+  arrivalLabel: string // "12:09 AM"
+  distanceLabel: string // "554 mi"
+  stretch: WorstStretch | null // what the driver will hit on this route, null when clear
+  stretchLine: string // the stretch as a sentence, or the clear-day sentence
+  whyLine: string // how this route beat the runner-up, in one short sentence
+  loadNote: string | null // the wind rule for this load, when wind is what the driver will hit
+}
+
+// The worst stretch of a route: the longest run of checkpoints at the route's highest level.
+export type WorstStretch = {
+  level: LevelView
+  cause: string | null // "wind", "rain", "snow"
+  miles: number // length of the run
+  fromMile: number
+  toMile: number
+  startsAtOrigin: boolean
+  endsAtDestination: boolean
+  fromClock: string // "10:40 PM"
+  toClock: string // "12:05 AM"
 }
 
 export type PlanView = {
@@ -75,7 +95,7 @@ export type PlanView = {
   verdict: Verdict
   departureLabel: string
   forecastLabel: string // says "Demo weather" when the plan is synthetic
-  demo: DemoScenario | null // the synthetic storm behind this plan; null for a real forecast
+  demo: DemoScenario[] | null // the synthetic storms behind this plan; null for a real forecast
   bounds: [[number, number], [number, number]]
   travelBearing: number // compass heading from origin to destination, for a route-up map
 }
@@ -86,7 +106,8 @@ export function buildPlanView(plan: Plan): PlanView {
   const recommended = plan.routes.find((r) => r.id === recommendedId)
   if (!recommended) throw new Error(`The plan recommends route ${recommendedId}, which is not in the plan.`)
   const fastestId = plan.routes.reduce((best, r) => (r.duration_s < best.duration_s ? r : best)).id
-  const routes = plan.routes.map((r) => routeView(r, plan.recommendation, recommended, fastestId, tz))
+  const routes = plan.routes.map((r) => routeView(r, recommended, fastestId, tz))
+  const best = routes.find((r) => r.isRecommended)!
   return {
     tripLabel: `${plan.trip.origin.label} → ${plan.trip.destination.label} · ${plan.trip.load_lb.toLocaleString('en-US')} lb`,
     savedLabel: plan.sample ? `Saved trip, recorded ${formatDate(plan.sample.recorded_utc, tz)}` : null,
@@ -98,9 +119,14 @@ export function buildPlanView(plan: Plan): PlanView {
     verdict: {
       routeId: recommended.id,
       headline: plan.recommendation.headline,
-      reason: plan.recommendation.reason,
       closeCall: plan.recommendation.close_call,
-      arrivalLabel: formatClock(recommended.arrival_utc, tz),
+      durationLabel: best.durationLabel,
+      arrivalLabel: best.arrivalShort,
+      distanceLabel: best.distanceLabel,
+      stretch: best.stretch,
+      stretchLine: stretchSentence(best.stretch, plan.trip.origin.label, plan.trip.destination.label),
+      whyLine: whyLine(plan, routes),
+      loadNote: best.stretch?.cause === 'wind' ? loadNote(plan.trip.load_lb) : null,
     },
     departureLabel: formatTime(plan.trip.departure_utc, tz),
     forecastLabel: plan.demo ? demoLabel(plan.demo) : forecastLabel(plan.weather),
@@ -114,28 +140,25 @@ function placeView(p: Place): Place {
   return { label: p.label, lon: p.lon, lat: p.lat }
 }
 
-function routeView(
-  r: PlanRoute,
-  rec: Plan['recommendation'],
-  recommended: PlanRoute,
-  fastestId: number,
-  tz: string,
-): RouteView {
+function routeView(r: PlanRoute, recommended: PlanRoute, fastestId: number, tz: string): RouteView {
   const isRecommended = r.id === recommended.id
+  const checkpoints = r.checkpoints.map((c, i) => checkpointView(c, `${r.id}-${i}`, tz))
+  const stretch = worstStretch(checkpoints, r.distance_mi)
   return {
     id: r.id,
     name: r.name,
     isRecommended,
     isFastest: r.id === fastestId,
     vsRecommended: isRecommended ? null : vsRecommendedLabel(recommended.duration_s - r.duration_s),
-    hazardLine: isRecommended ? null : (rec.why_not.find((w) => w.route_id === r.id)?.hazard ?? 'Clear all the way'),
+    stretch,
+    stretchShort: stretchShort(stretch),
     distanceLabel: `${Math.round(r.distance_mi)} mi`,
     durationLabel: formatDuration(r.duration_s),
     arrivalLabel: formatTime(r.arrival_utc, tz),
     arrivalShort: formatClock(r.arrival_utc, tz),
     worst: LEVELS[r.summary.max_level],
     geometry: r.geometry,
-    checkpoints: r.checkpoints.map((c, i) => checkpointView(c, `${r.id}-${i}`, tz)),
+    checkpoints,
   }
 }
 
@@ -144,6 +167,7 @@ function checkpointView(c: PlanCheckpoint, id: string, tz: string): CheckpointVi
     id,
     lon: c.lon,
     lat: c.lat,
+    mile: c.mile,
     mileLabel: `Mile ${Math.round(c.mile)}`,
     etaLabel: formatTime(c.eta_utc, tz),
     etaShort: formatClock(c.eta_utc, tz),
@@ -155,10 +179,11 @@ function checkpointView(c: PlanCheckpoint, id: string, tz: string): CheckpointVi
 
 // deltaS = recommended duration - this route's duration; positive means this route arrives sooner.
 export function vsRecommendedLabel(deltaS: number): VsRecommended {
-  // Branch on whole minutes so a gap under 30 s never reads "0 min sooner".
+  // Branch on whole minutes so a gap under 30 s never reads "−0 min". "+" is slower than the
+  // recommended route, "−" faster, read as time added to or taken off the trip.
   const minutes = Math.round(deltaS / 60)
-  if (minutes > 0) return { label: `${formatDuration(deltaS)} sooner`, tone: 'sooner' }
-  if (minutes < 0) return { label: `${formatDuration(-deltaS)} later`, tone: 'later' }
+  if (minutes > 0) return { label: `−${formatDuration(deltaS)}`, tone: 'sooner' }
+  if (minutes < 0) return { label: `+${formatDuration(-deltaS)}`, tone: 'later' }
   return { label: 'Same time', tone: 'same' }
 }
 
@@ -209,9 +234,10 @@ export function compassPoint(deg: number): string {
   return COMPASS[point] ?? 'N'
 }
 
-// "Demo weather: a synthetic wind storm sweeping the corridor (not a forecast)"
-function demoLabel(demo: DemoScenario): string {
-  return `Demo weather: a synthetic ${demo} storm sweeping the corridor (not a forecast)`
+// "Demo weather: a synthetic wind and rain storm sweeping the corridor (not a forecast)"
+function demoLabel(demo: DemoScenario[]): string {
+  const kinds = demo.length > 1 ? `${demo.slice(0, -1).join(', ')} and ${demo[demo.length - 1]}` : demo[0]
+  return `Demo weather: a synthetic ${kinds} storm sweeping the corridor (not a forecast)`
 }
 
 // "ICON forecast on a 0.35° grid (about 39 km), 189 points"
@@ -295,4 +321,95 @@ export function worstHazard(route: RouteView): CheckpointView | null {
     if (c.level.rank > 0 && c.level.rank > (worst?.level.rank ?? 0)) worst = c
   }
   return worst
+}
+
+// The longest run of checkpoints at the route's highest level; null when every checkpoint is Low.
+// A checkpoint owns the road from halfway to its neighbour on each side (the first from the
+// origin, the last to the destination), the same accounting as the route summary's miles.
+export function worstStretch(checkpoints: CheckpointView[], distanceMi: number): WorstStretch | null {
+  const top = Math.max(0, ...checkpoints.map((c) => c.level.rank))
+  if (top === 0) return null
+  let best: [number, number] | null = null
+  let start = -1
+  for (let i = 0; i <= checkpoints.length; i++) {
+    const at = checkpoints[i]?.level.rank === top
+    if (at && start < 0) start = i
+    if (!at && start >= 0) {
+      if (!best || i - start > best[1] - best[0] + 1) best = [start, i - 1]
+      start = -1
+    }
+  }
+  if (!best) return null
+  const [a, b] = best
+  const first = checkpoints[a]!
+  const last = checkpoints[b]!
+  const before = checkpoints[a - 1]
+  const after = checkpoints[b + 1]
+  const fromMile = before ? (before.mile + first.mile) / 2 : 0
+  const toMile = after ? (last.mile + after.mile) / 2 : distanceMi
+  const cause = checkpoints.slice(a, b + 1).find((c) => c.causeLabel)?.causeLabel?.toLowerCase() ?? null
+  return {
+    level: first.level,
+    cause,
+    miles: Math.round(toMile - fromMile),
+    fromMile: Math.round(fromMile),
+    toMile: Math.round(toMile),
+    startsAtOrigin: a === 0,
+    endsAtDestination: b === checkpoints.length - 1,
+    fromClock: first.etaShort,
+    toClock: last.etaShort,
+  }
+}
+
+const CLEAR = 'Clear all the way'
+
+// "No travel wind, 67 mi"
+export function stretchShort(stretch: WorstStretch | null): string {
+  if (!stretch) return CLEAR
+  return `${stretch.level.label}${stretch.cause ? ` ${stretch.cause}` : ''}, ${stretch.miles} mi`
+}
+
+// "No travel wind for the last 67 mi into Denver, CO, 10:40 PM to 12:05 AM."
+export function stretchSentence(stretch: WorstStretch | null, origin: string, destination: string): string {
+  if (!stretch) return `${CLEAR}. Nothing above Low at any checkpoint.`
+  const what = `${stretch.level.label}${stretch.cause ? ` ${stretch.cause}` : ''}`
+  const where = stretch.endsAtDestination
+    ? `for the last ${stretch.miles} mi into ${destination}`
+    : stretch.startsAtOrigin
+      ? `for the first ${stretch.miles} mi out of ${origin}`
+      : `for ${stretch.miles} mi from mile ${stretch.fromMile}`
+  const when = stretch.fromClock === stretch.toClock ? `around ${stretch.fromClock}` : `${stretch.fromClock} to ${stretch.toClock}`
+  return `${what} ${where}, ${when}.`
+}
+
+const COUNT_WORDS = ['', 'one', 'two', 'three', 'four', 'five']
+
+// How the recommended route beat the runner-up, from the criterion the ranking says decided it.
+function whyLine(plan: Plan, routes: RouteView[]): string {
+  const rec = plan.recommendation
+  const runner = plan.routes.find((r) => r.id === rec.runner_up_id)
+  if (!runner || rec.decided_by === null) return 'The only route found.'
+  const count = COUNT_WORDS[plan.routes.length] ?? String(plan.routes.length)
+  const milesAt: Record<string, [string, keyof PlanRoute['summary']]> = {
+    no_travel_mi: ['No Travel', 'no_travel_mi'],
+    severe_mi: ['Severe', 'severe_mi'],
+    high_mi: ['High', 'high_mi'],
+  }
+  const byMiles = milesAt[rec.decided_by]
+  if (byMiles) {
+    const [word, key] = byMiles
+    return `Least ${word} weather of the ${count}: ${runner.name} has ${Math.round(Number(runner.summary[key]))} mi.`
+  }
+  if (rec.decided_by === 'avg_risk') return `Lowest average risk of the ${count}.`
+  const faster = formatDuration(Math.abs(rec.time_vs_runner_up_s))
+  const sameWeather = routes.find((r) => r.id === runner.id)?.stretchShort === routes.find((r) => r.isRecommended)?.stretchShort
+  return `${sameWeather ? 'Same weather as' : 'Beats'} ${runner.name}, ${faster} faster.`
+}
+
+// The wind rule the load puts the driver under, from the assessment's load bands.
+export function loadNote(loadLb: number): string {
+  const load = `${loadLb.toLocaleString('en-US')} lb load`
+  if (loadLb > 40_000) return `${load}: wind over 35 mph is Severe, over 45 mph is No Travel.`
+  if (loadLb > 30_000) return `${load}: wind over 45 mph is No Travel.`
+  return `${load}: wind over 55 mph is No Travel.`
 }

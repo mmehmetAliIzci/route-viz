@@ -137,12 +137,13 @@ function windVectors(speed: Float32Array, fromDeg: Float32Array): WindVectors {
   return { u, v }
 }
 
-// The wind at a point, in mph: bilinear between the four surrounding nodes, linear between
-// the two neighbouring hours. Null off the grid or when any of the four nodes has no
-// forecast, so wind particles stop at the edge of the corridor.
-export function sampleWind(field: HeatmapField, hour: number, lon: number, lat: number): { u: number; v: number } | null {
-  const { nx, ny, hours, windVectors } = field
-  if (!windVectors || nx < 2 || ny < 2) return null
+// The four nodes around a point and their bilinear weights, with the hour blend. Null off the
+// grid or when any of the four nodes has no forecast, so particles stop at the corridor's edge.
+type Stencil = { nodes: [number, number, number, number]; weights: [number, number, number, number]; h0: number; h1: number; fh: number }
+
+function stencil(field: HeatmapField, hour: number, lon: number, lat: number): Stencil | null {
+  const { nx, ny, hours } = field
+  if (nx < 2 || ny < 2) return null
   const gx = (lon - field.west) / field.stepDeg
   const gy = (lat - field.south) / field.stepDeg
   if (!(gx >= 0 && gy >= 0 && gx <= nx - 1 && gy <= ny - 1)) return null // also rejects NaN
@@ -151,25 +152,46 @@ export function sampleWind(field: HeatmapField, hour: number, lon: number, lat: 
   const fx = gx - i
   const fy = gy - j
   const sw = j * nx + i
-  const nodes = [sw, sw + 1, sw + nx, sw + nx + 1]
+  const nodes: Stencil['nodes'] = [sw, sw + 1, sw + nx, sw + nx + 1]
   if (nodes.some((k) => field.present[k] !== 1)) return null
-  const weights = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy]
-
   const h = Math.min(Math.max(hour, 0), hours - 1)
   const h0 = Math.floor(h)
-  const h1 = Math.min(h0 + 1, hours - 1)
-  const fh = h - h0
-  const n = nx * ny
-  const at = (values: Float32Array): number => {
-    let sum = 0
-    for (let c = 0; c < 4; c++) {
-      const k = nodes[c] ?? 0
-      const value = (values[h0 * n + k] ?? 0) * (1 - fh) + (values[h1 * n + k] ?? 0) * fh
-      sum += value * (weights[c] ?? 0)
-    }
-    return sum
+  return {
+    nodes,
+    weights: [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy],
+    h0,
+    h1: Math.min(h0 + 1, hours - 1),
+    fh: h - h0,
   }
-  return { u: at(windVectors.u), v: at(windVectors.v) }
+}
+
+function blend(field: HeatmapField, values: Float32Array, s: Stencil): number {
+  const n = field.nx * field.ny
+  let sum = 0
+  for (let c = 0; c < 4; c++) {
+    const k = s.nodes[c] ?? 0
+    const value = (values[s.h0 * n + k] ?? 0) * (1 - s.fh) + (values[s.h1 * n + k] ?? 0) * s.fh
+    sum += value * (s.weights[c] ?? 0)
+  }
+  return sum
+}
+
+// The wind at a point, in mph: bilinear between the four surrounding nodes, linear between
+// the two neighbouring hours. Null on plans without direction, off the grid, or next to a
+// node with no forecast.
+export function sampleWind(field: HeatmapField, hour: number, lon: number, lat: number): { u: number; v: number } | null {
+  const { windVectors } = field
+  if (!windVectors) return null
+  const s = stencil(field, hour, lon, lat)
+  if (!s) return null
+  return { u: blend(field, windVectors.u, s), v: blend(field, windVectors.v, s) }
+}
+
+// A channel's value at a point in its physical units (mph, in/hr, risk level), interpolated the
+// same way as the wind. Null off the grid or next to a node with no forecast.
+export function sampleValue(field: HeatmapField, kind: HeatmapKind, hour: number, lon: number, lat: number): number | null {
+  const s = stencil(field, hour, lon, lat)
+  return s ? blend(field, field.values[kind], s) : null
 }
 
 export const HEATMAP_UPSAMPLE = 8

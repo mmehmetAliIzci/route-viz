@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from planner import http, plan
+from planner import http, plan, routing, weather
 from planner.demo import Scenario
 
 FIX = Path(__file__).parent / "fixtures"
@@ -38,12 +38,22 @@ def build_kc_den(
     for location in grid if patch_hourly else []:
         patch_hourly(location["hourly"])
 
+    # The recording holds every grid node in route_grid's order; a chunked request gets the
+    # bodies for the coordinates it asked for.
+    lines = [r.geometry for r in routing.parse(tomtom)]
+    lay = weather.layout(lines)
+    order = {
+        (f"{lay.south + (k // lay.nx) * lay.step:.4f}", f"{lay.west + (k % lay.nx) * lay.step:.4f}"): n
+        for n, k in enumerate(sorted(lay.nodes))
+    }
+
     def fake_get(provider: str, url: str, params: dict, deadline: object = None) -> object:
         if provider == "tomtom":
             return tomtom
         if demo is not None:
             raise AssertionError(f"demo plan called {provider}")
-        return grid
+        asked = zip(params["latitude"].split(","), params["longitude"].split(","), strict=True)
+        return [grid[order[coord]] for coord in asked]
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(http, "get_json", fake_get)

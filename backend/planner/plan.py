@@ -17,7 +17,7 @@ from planner.http import Deadline
 from planner.sampling import LonLat
 
 SIMPLIFY_MI = 0.25  # route lines sent to the browser keep a point at least this often
-BUDGET_S = 25  # a plan that takes longer fails as plan_timeout
+BUDGET_S = 40  # a plan that takes longer fails as plan_timeout; a 1,700-mile trip needs most of it
 HEATMAP_HOURS = 49  # hours 0 to 48
 
 log = logging.getLogger("planner")
@@ -63,13 +63,15 @@ def build(
     api_key: str,
     viewer_tz: str = "UTC",
     deadline: Deadline | None = None,
-    demo: demo_weather.Scenario | None = None,
+    demo: demo_weather.Scenario | demo_weather.Scenarios | None = None,
 ) -> dict[str, Any]:
     """The plan for a trip, its text in the viewer's time zone (an IANA name).
 
-    With `demo`, the weather is a synthetic front (planner/demo.py) and Open-Meteo is not called.
+    With `demo` (one or more scenarios) the weather is a synthetic front (planner/demo.py);
+    Open-Meteo is not called.
     """
     started = time.monotonic()
+    scenarios = demo_weather.normalize(demo) if demo is not None else None
     explain.zone(viewer_tz)  # fail on a bad zone before any provider call
     deadline = deadline or Deadline.after(BUDGET_S)
     o, d = trip.origin, trip.destination
@@ -88,8 +90,8 @@ def build(
         for i, r in enumerate(found)
     ]
     lines = [r.geometry for r in found]
-    if demo is not None:
-        grid = demo_weather.grid(weather.layout(lines), trip.departure, HEATMAP_HOURS, demo)
+    if scenarios is not None:
+        grid = demo_weather.grid(weather.layout(lines), trip.departure, HEATMAP_HOURS, scenarios)
     else:
         last_eta = max(c.eta for s in shapes for c in s.checkpoints)
         end = max(last_eta, trip.departure + timedelta(hours=HEATMAP_HOURS - 1))
@@ -105,10 +107,10 @@ def build(
             "origin_tz": origin_tz(o.lon, o.lat),
             "viewer_tz": viewer_tz,
         },
-        **score(trip, shapes, grid, viewer_tz, demo),
+        **score(trip, shapes, grid, viewer_tz, scenarios),
     }
-    if demo is not None:
-        body["demo"] = demo
+    if scenarios is not None:
+        body["demo"] = list(scenarios)
     log.info("plan_built ms=%d routes=%d", round((time.monotonic() - started) * 1000), len(found))
     return body
 
@@ -118,7 +120,7 @@ def score(
     shapes: Sequence[RouteShape],
     grid: weather.Grid,
     viewer_tz: str = "UTC",
-    demo: demo_weather.Scenario | None = None,
+    demo: demo_weather.Scenarios | None = None,
 ) -> dict[str, Any]:
     """The routes, recommendation, weather and heatmap sections for routes read against `grid`.
 

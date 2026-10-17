@@ -71,7 +71,7 @@ def test_a_saved_plan_can_be_rescored_against_demo_weather(sample_id: str) -> No
     before = deepcopy(stored)
     wind = samples.with_demo(stored, "wind", None)
     assert stored == before  # the shared copy is untouched
-    assert wind["demo"] == "wind"
+    assert wind["demo"] == ["wind"]
     assert wind["sample"] == stored["sample"]
     assert wind["trip"] == stored["trip"] | {"viewer_tz": stored["trip"]["origin_tz"]}
     assert wind["weather"]["source"] == "Demo weather (synthetic, not a forecast)"
@@ -88,9 +88,24 @@ def test_a_saved_plan_can_be_rescored_against_demo_weather(sample_id: str) -> No
     assert samples.with_demo(stored, "wind", "America/Denver")["trip"]["viewer_tz"] == "America/Denver"
 
 
+def test_wind_and_rain_together_score_the_worse_of_the_two() -> None:
+    stored = samples.get("kansas-city-denver")
+    both = samples.with_demo(stored, ("wind", "rain"), None)
+    assert both["demo"] == ["wind", "rain"]
+    wind = samples.with_demo(stored, "wind", None)
+    rain = samples.with_demo(stored, "rain", None)
+    rank = {"low": 0, "moderate": 1, "high": 2, "severe": 3, "no_travel": 4}
+    for b, w, r in zip(both["routes"], wind["routes"], rain["routes"], strict=True):
+        for cb, cw, cr in zip(b["checkpoints"], w["checkpoints"], r["checkpoints"], strict=True):
+            assert cb["wind_mph"] == cw["wind_mph"] and cb["rain_in_hr"] == cr["rain_in_hr"]
+            assert rank[cb["level"]] == max(rank[cw["level"]], rank[cr["level"]])
+
+
 def test_demo_rescoring_rejects_unknown_input() -> None:
     stored = samples.get("kansas-city-denver")
     with pytest.raises(ValueError):
         samples.with_demo(stored, "wind", "Mars/Olympus")
     with pytest.raises(ValueError):
         samples.with_demo(stored, "hail", None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        samples.with_demo(stored, (), None)

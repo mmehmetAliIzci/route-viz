@@ -6,17 +6,20 @@ import {
   createParticles,
   MAX_PARTICLES,
   MIN_PARTICLES,
+  MIN_SPEED_MPH,
   recordFrame,
   SLOW_FRAME_MS,
   SLOW_FRAMES_TO_HALVE,
-  CSS_PX_PER_PARTICLE,
+  carriedBy,
+  fallSpeed,
+  KIND_STYLES,
+  toScreen,
   MAX_STEP_S,
   particleCount,
   seededRandom,
   setParticleCount,
   SPEED_PX_PER_MPH_PER_S,
   stepParticles,
-  TRAIL_POINTS,
   type MapView,
 } from './windParticles'
 
@@ -26,7 +29,8 @@ const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes))
 const NX = 5
 const NY = 3
 const EAST = -100 + (NX - 1) * 0.5
-function corridor({ mph = 30, fromDeg = 270, mask = new Array(NX * NY).fill(1) } = {}) {
+type CorridorOptions = { mph?: number; fromDeg?: number; mask?: number[]; rain?: number[]; snow?: number[] } // rain, snow in/hr per node
+function corridor({ mph = 30, fromDeg = 270, mask = new Array(NX * NY).fill(1), rain, snow }: CorridorOptions = {}) {
   const n = NX * NY
   const zeros = b64(new Array(n).fill(0))
   const heatmap: Plan['heatmap'] = {
@@ -42,8 +46,8 @@ function corridor({ mph = 30, fromDeg = 270, mask = new Array(NX * NY).fill(1) }
     channels: {
       risk: { scale: 1, data: zeros },
       wind: { scale: 0.5, data: b64(new Array(n).fill(mph * 2)) },
-      rain: { scale: 0.005, data: zeros },
-      snow: { scale: 0.02, data: zeros },
+      rain: { scale: 0.005, data: rain ? b64(rain.map((v) => Math.round(v / 0.005))) : zeros },
+      snow: { scale: 0.02, data: snow ? b64(snow.map((v) => Math.round(v / 0.02))) : zeros },
       wind_dir: { scale: 2, data: b64(new Array(n).fill(fromDeg / 2)) },
     },
   }
@@ -56,6 +60,7 @@ const view: MapView = {
   project: (lon, lat) => [(lon + 100) * PX_PER_DEG, -(lat - 38) * PX_PER_DEG],
   unproject: (x, y) => [x / PX_PER_DEG - 100, 38 - y / PX_PER_DEG],
   area: null,
+  bearing: 0,
 }
 
 const head = (trail: number[]): [number, number] => [trail[trail.length - 2] ?? Number.NaN, trail[trail.length - 1] ?? Number.NaN]
@@ -147,7 +152,7 @@ describe('stepParticles', () => {
     const state = createParticles(field, 100, seededRandom(9))
     for (let f = 0; f < 200; f++) stepParticles(state, field, 0, view, 1 / 60)
     const lengths = state.particles.map((p) => p.trail.length)
-    expect(Math.max(...lengths)).toBe(TRAIL_POINTS * 2)
+    expect(Math.max(...lengths)).toBe(KIND_STYLES.wind.trailPoints * 2)
   })
 
   it('respawns inside the visible area when it overlaps the corridor', () => {
@@ -177,7 +182,7 @@ describe('stepParticles', () => {
 
 describe('particle count', () => {
   it('scales with the map area and stops at the cap', () => {
-    expect(particleCount(900, 600)).toBe(Math.round((900 * 600) / CSS_PX_PER_PARTICLE))
+    expect(particleCount(900, 600)).toBe(Math.round((900 * 600) / KIND_STYLES.wind.pxPerParticle))
     expect(particleCount(4000, 3000)).toBe(MAX_PARTICLES)
     expect(particleCount(0, 600)).toBe(0)
   })
@@ -249,5 +254,129 @@ describe('frame budget', () => {
     expect(particleCount(300, 400)).toBeLessThan(MIN_PARTICLES)
     expect(budgetedCount(budget, 300, 400)).toBe(particleCount(300, 400))
     expect(budgetedCount(budget, 0, 600)).toBe(0)
+  })
+})
+
+// Rain on the two western columns only (0.5 in/hr), dry everywhere else.
+const WEST_RAIN = Array.from({ length: NX * NY }, (_, k) => (k % NX < 2 ? 0.5 : 0))
+
+describe('rain and snow particles', () => {
+  it('spawn only where it is raining', () => {
+    const field = corridor({ rain: WEST_RAIN })
+    const state = createParticles(field, 120, seededRandom(21), null, 'rain')
+    const live = state.particles.filter((p) => p.trail.length > 0)
+    expect(live.length).toBeGreaterThan(60)
+    for (const p of live) expect(p.trail[0]!).toBeLessThan(-100 + 1.5) // the wet columns end 1.5 degrees east of the west edge
+  })
+
+  it('spawn more where it rains harder', () => {
+    const light = Array.from({ length: NX * NY }, () => 0.03)
+    const heavy = Array.from({ length: NX * NY }, () => 0.6)
+    const few = createParticles(corridor({ rain: light }), 200, seededRandom(22), null, 'rain').particles.filter((p) => p.trail.length > 0)
+    const many = createParticles(corridor({ rain: heavy }), 200, seededRandom(22), null, 'rain').particles.filter((p) => p.trail.length > 0)
+    expect(many.length).toBeGreaterThan(few.length)
+  })
+
+  it('are born spent when the whole corridor is dry, and draw nothing', () => {
+    const state = createParticles(corridor(), 50, seededRandom(23), null, 'snow')
+    expect(state.particles.every((p) => p.trail.length === 0 && p.age >= p.maxAge)).toBe(true)
+  })
+
+  it('respawn when they drift out of the rain', () => {
+    // Westerly wind carries the particle east out of the wet columns.
+    const field = corridor({ mph: 30, fromDeg: 270, rain: WEST_RAIN })
+    const state = createParticles(field, 1, seededRandom(24), null, 'rain')
+    const p = state.particles[0]!
+    p.trail = [-100 + 1.45, 38.5] // just inside the rain, heading east
+    p.age = 0
+    stepParticles(state, field, 0, view, MAX_STEP_S)
+    stepParticles(state, field, 0, view, MAX_STEP_S) // now in dry air: replaced
+    expect(state.particles[0]).not.toBe(p)
+  })
+
+  it('fall down the screen whatever the wind, leaning with it', () => {
+    const field = corridor({ mph: 20, fromDeg: 270, rain: WEST_RAIN }) // westerly: blows east
+    const state = createParticles(field, 1, seededRandom(26), null, 'rain')
+    const p = state.particles[0]!
+    p.trail = [-99.8, 38.6]
+    p.age = 0
+    stepParticles(state, field, 0, view, 1 / 60)
+    const dxPx = (p.trail[2]! - p.trail[0]!) * PX_PER_DEG
+    const dyPx = -(p.trail[3]! - p.trail[1]!) * PX_PER_DEG // screen y grows downward
+    expect(dyPx).toBeCloseTo(fallSpeed(KIND_STYLES.rain, 0.5) / 60, 3) // 0.5 in/hr is full strength
+    expect(dxPx).toBeGreaterThan(0) // leans east with the wind
+    expect(dxPx).toBeLessThan(dyPx)
+    // Still air: straight down.
+    const calm = corridor({ mph: 0, rain: WEST_RAIN })
+    expect(carriedBy(calm, 'rain', 0, -99.8, 38.5)).toEqual({ u: 0, v: 0, amount: 0.5 })
+  })
+
+  it('fall faster the harder it rains', () => {
+    const [light, heavy] = KIND_STYLES.rain.fallPxPerS
+    expect(fallSpeed(KIND_STYLES.rain, KIND_STYLES.rain.threshold!)).toBe(light)
+    expect(fallSpeed(KIND_STYLES.rain, 0.25)).toBeGreaterThan(light)
+    expect(fallSpeed(KIND_STYLES.rain, 0.25)).toBeLessThan(heavy)
+    expect(fallSpeed(KIND_STYLES.rain, 2)).toBe(heavy) // capped past full strength
+  })
+
+  it('drift snow slower than the slowest wind streak', () => {
+    const [, heaviest] = KIND_STYLES.snow.fallPxPerS
+    expect(heaviest).toBeLessThan(MIN_SPEED_MPH * SPEED_PX_PER_MPH_PER_S * 6) // under a 6 mph breeze's streak speed
+  })
+
+  it('fall slower as snow than as rain', () => {
+    const everywhere = Array.from({ length: NX * NY }, () => 1)
+    const fell = (kind: 'rain' | 'snow') => {
+      const field = corridor({ mph: 0, rain: everywhere, snow: everywhere })
+      const state = createParticles(field, 1, seededRandom(27), null, kind)
+      const p = state.particles[0]!
+      p.trail = [-99.5, 38.6]
+      p.age = 0
+      stepParticles(state, field, 0, view, 1 / 60)
+      return -(p.trail[p.trail.length - 1]! - 38.6) * PX_PER_DEG // the head; a snowflake keeps no tail
+    }
+    expect(fell('rain')).toBeGreaterThan(fell('snow'))
+    expect(fell('snow')).toBeGreaterThan(0)
+  })
+
+  it('remember how hard it was falling where they were born, as a size from 0 to 1', () => {
+    const drizzle = Array.from({ length: NX * NY }, () => 0.02)
+    const pour = Array.from({ length: NX * NY }, () => 0.9)
+    const light = createParticles(corridor({ rain: drizzle }), 40, seededRandom(31), null, 'rain').particles.filter((p) => p.trail.length)
+    const heavy = createParticles(corridor({ rain: pour }), 40, seededRandom(31), null, 'rain').particles.filter((p) => p.trail.length)
+    expect(light.every((p) => p.size < 0.1)).toBe(true)
+    expect(heavy.every((p) => p.size === 1)).toBe(true)
+    const wind = createParticles(corridor(), 5, seededRandom(32), null, 'wind').particles
+    expect(wind.every((p) => p.size === 1)).toBe(true)
+  })
+
+  it('give each kind its own density and trail length', () => {
+    expect(particleCount(900, 600, 'rain')).toBeGreaterThan(particleCount(900, 600, 'wind'))
+    expect(KIND_STYLES.rain.trailPoints).toBeLessThan(KIND_STYLES.wind.trailPoints)
+    expect(KIND_STYLES.snow.trailPoints).toBeLessThan(KIND_STYLES.rain.trailPoints)
+  })
+})
+
+describe('map rotation', () => {
+  it('turns a geographic wind into screen motion by the bearing', () => {
+    const [x0, y0] = toScreen(0, 10, 0) // north wind, north up: straight up the screen
+    expect([x0, y0]).toEqual([0, -10])
+    const [x90, y90] = toScreen(0, 10, 90) // east up: north points left
+    expect(x90).toBeCloseTo(-10, 6)
+    expect(y90).toBeCloseTo(0, 6)
+    const [xe, ye] = toScreen(10, 0, 90) // east wind with east up: straight up
+    expect(xe).toBeCloseTo(0, 6)
+    expect(ye).toBeCloseTo(-10, 6)
+  })
+
+  it('moves wind particles by the rotated wind', () => {
+    const field = corridor({ mph: 30, fromDeg: 180 }) // southerly: blows north
+    const state = createParticles(field, 1, seededRandom(28), null, 'wind')
+    const p = state.particles[0]!
+    p.trail = [-99, 38.5]
+    p.age = 0
+    stepParticles(state, field, 0, { ...view, bearing: 90 }, 1 / 60) // east up, so north is screen-left
+    expect(p.trail[2]!).toBeLessThan(p.trail[0]!) // the flat test map maps screen-left to west
+    expect(Math.abs(p.trail[3]! - p.trail[1]!)).toBeLessThan(1e-6)
   })
 })

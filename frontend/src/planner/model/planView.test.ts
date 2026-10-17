@@ -12,6 +12,9 @@ import {
   routeSegments,
   vsRecommendedLabel,
   worstHazard,
+  worstStretch,
+  stretchSentence,
+  loadNote,
   type CheckpointView,
   type RouteView,
 } from './planView'
@@ -19,19 +22,21 @@ import {
 const plan = parsePlan(fixture)
 
 describe('hazardLine', () => {
-  it('is the hazard sentence, or Clear all the way when there is none', () => {
-    const hazard = 'Moderate rain at mile 175 around 5:23 AM.'
-    const withHazard = buildPlanView({
-      ...plan,
-      recommendation: {
-        ...plan.recommendation,
-        why_not: plan.recommendation.why_not.map((w, i) => (i === 0 ? { ...w, hazard } : { ...w, hazard: null })),
-      },
-    })
-    const others = withHazard.routes.filter((r) => !r.isRecommended)
-    expect(others[0]?.hazardLine).toBe(hazard)
-    expect(others[1]?.hazardLine).toBe('Clear all the way')
-    expect(withHazard.routes.find((r) => r.isRecommended)?.hazardLine).toBeNull()
+  it('describes each route by its worst stretch, and says clear when nothing is above Low', () => {
+    const [first, ...rest] = plan.routes
+    const stormy = {
+      ...first!,
+      checkpoints: first!.checkpoints.map((c, i) => (i >= 2 && i <= 4 ? { ...c, level: 'severe' as const, cause: 'rain' as const } : c)),
+    }
+    const view = buildPlanView({ ...plan, routes: [stormy, ...rest] })
+    const route = view.routes.find((r) => r.id === first!.id)!
+    expect(route.stretch?.level.key).toBe('severe')
+    expect(route.stretch?.cause).toBe('rain')
+    const cps = first!.checkpoints
+    const owned = (cps[4]!.mile + cps[5]!.mile) / 2 - (cps[1]!.mile + cps[2]!.mile) / 2 // halfway to each neighbour
+    expect(route.stretch?.miles).toBe(Math.round(owned))
+    expect(route.stretchShort).toBe(`Severe rain, ${route.stretch?.miles} mi`)
+    expect(view.routes.filter((r) => r.id !== first!.id).every((r) => r.stretchShort === 'Clear all the way')).toBe(true)
   })
 })
 
@@ -75,7 +80,10 @@ describe('buildPlanView', () => {
     expect(view.verdict.routeId).toBe(plan.recommendation.route_id)
     expect(recommended).toBeDefined()
     expect(view.verdict.headline).toBe(plan.recommendation.headline)
-    expect(view.verdict.reason).toBe(plan.recommendation.reason)
+    expect(view.verdict.whyLine).toBe('Same weather as I-80 W / I-76 W, 1 h 16 min faster.')
+    expect(view.verdict.stretchLine).toBe('Clear all the way. Nothing above Low at any checkpoint.')
+    expect(view.verdict.durationLabel).toBe(formatDuration(recommended?.duration_s ?? 0))
+    expect(view.verdict.loadNote).toBeNull()
     expect(view.verdict.closeCall).toBe(plan.recommendation.close_call)
     expect(view.verdict.arrivalLabel).toBe(formatClock(recommended?.arrival_utc ?? '', view.viewerTz))
   })
@@ -141,16 +149,16 @@ describe('labels', () => {
   })
 
   it('compares a route with the recommended one', () => {
-    expect(vsRecommendedLabel(4465)).toEqual({ label: '1 h 14 min sooner', tone: 'sooner' })
-    expect(vsRecommendedLabel(-6862)).toEqual({ label: '1 h 54 min later', tone: 'later' })
+    expect(vsRecommendedLabel(4465)).toEqual({ label: '−1 h 14 min', tone: 'sooner' })
+    expect(vsRecommendedLabel(-6862)).toEqual({ label: '+1 h 54 min', tone: 'later' })
     expect(vsRecommendedLabel(0)).toEqual({ label: 'Same time', tone: 'same' })
   })
 
   it('treats a gap under half a minute as the same time', () => {
     expect(vsRecommendedLabel(20)).toEqual({ label: 'Same time', tone: 'same' })
     expect(vsRecommendedLabel(-20)).toEqual({ label: 'Same time', tone: 'same' })
-    expect(vsRecommendedLabel(40)).toEqual({ label: '1 min sooner', tone: 'sooner' })
-    expect(vsRecommendedLabel(-40)).toEqual({ label: '1 min later', tone: 'later' })
+    expect(vsRecommendedLabel(40)).toEqual({ label: '−1 min', tone: 'sooner' })
+    expect(vsRecommendedLabel(-40)).toEqual({ label: '+1 min', tone: 'later' })
   })
 
   it('names the risk levels for drivers', () => {
@@ -205,10 +213,11 @@ describe('saved trips', () => {
 
 describe('demo weather', () => {
   it('says the weather is synthetic, and leaves a real forecast alone', () => {
-    const demo = buildPlanView({ ...plan, demo: 'wind' })
-    expect(demo.demo).toBe('wind')
+    const demo = buildPlanView({ ...plan, demo: ['wind'] })
+    expect(demo.demo).toEqual(['wind'])
     expect(demo.forecastLabel).toBe('Demo weather: a synthetic wind storm sweeping the corridor (not a forecast)')
-    expect(buildPlanView({ ...plan, demo: 'snow' }).forecastLabel).toContain('synthetic snow storm')
+    expect(buildPlanView({ ...plan, demo: ['snow'] }).forecastLabel).toContain('synthetic snow storm')
+    expect(buildPlanView({ ...plan, demo: ['wind', 'rain', 'snow'] }).forecastLabel).toContain('synthetic wind, rain and snow storm')
     const real = buildPlanView(plan)
     expect(real.demo).toBeNull()
     expect(real.forecastLabel).toMatch(/^ICON forecast/)
@@ -247,6 +256,7 @@ function checkpoint(vertex: number, level: keyof typeof LEVELS, cause: string | 
     id: `c${vertex}`,
     lon: vertex,
     lat: 0.1, // just off the road, nearest to this vertex
+    mile: vertex,
     mileLabel: `Mile ${vertex}`,
     etaLabel: 'Fri, 10:00 PM CDT',
     etaShort: '10:00 PM',
@@ -311,5 +321,40 @@ describe('trip ends', () => {
     const view = buildPlanView(plan)
     expect(view.origin).toEqual({ label: plan.trip.origin.label, lon: plan.trip.origin.lon, lat: plan.trip.origin.lat })
     expect(view.destination.label).toBe(plan.trip.destination.label)
+  })
+})
+
+describe('worstStretch', () => {
+  const cps = (levels: (keyof typeof LEVELS)[], cause: string | null = 'Wind') =>
+    levels.map((lv, i) => ({ ...checkpoint(i, lv, lv === 'low' ? null : cause), mile: i * 25, etaShort: `${i}:00 PM` }))
+
+  it('is null when every checkpoint is Low', () => {
+    expect(worstStretch(cps(['low', 'low', 'low']), 75)).toBeNull()
+  })
+
+  it('finds the longest run at the highest level, with its miles and clock span', () => {
+    const run = worstStretch(cps(['low', 'severe', 'low', 'severe', 'severe', 'low']), 150)!
+    expect(run.level.key).toBe('severe')
+    expect(run.cause).toBe('wind')
+    expect([run.fromMile, run.toMile, run.miles]).toEqual([63, 113, 50]) // halfway to the Low neighbours
+    expect([run.fromClock, run.toClock]).toEqual(['3:00 PM', '4:00 PM'])
+    expect(run.startsAtOrigin).toBe(false)
+    expect(run.endsAtDestination).toBe(false)
+  })
+
+  it('writes the sentence around the trip ends', () => {
+    const intoDenver = worstStretch(cps(['low', 'low', 'no_travel', 'no_travel']), 90) // the run owns mile 37.5 to the end
+    expect(stretchSentence(intoDenver, 'Kansas City, MO', 'Denver, CO')).toBe(
+      'No travel wind for the last 53 mi into Denver, CO, 2:00 PM to 3:00 PM.',
+    )
+    const outOfKc = worstStretch(cps(['moderate', 'low', 'low'], 'Rain'), 75) // owns the origin to mile 12.5
+    expect(stretchSentence(outOfKc, 'Kansas City, MO', 'Denver, CO')).toBe('Moderate rain for the first 13 mi out of Kansas City, MO, around 0:00 PM.')
+    expect(stretchSentence(null, 'a', 'b')).toBe('Clear all the way. Nothing above Low at any checkpoint.')
+  })
+
+  it('states the wind rule for the load', () => {
+    expect(loadNote(38_000)).toBe('38,000 lb load: wind over 45 mph is No Travel.')
+    expect(loadNote(44_000)).toContain('over 35 mph is Severe')
+    expect(loadNote(20_000)).toContain('over 55 mph')
   })
 })

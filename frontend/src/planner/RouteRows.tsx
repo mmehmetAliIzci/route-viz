@@ -46,16 +46,14 @@ export function RouteRows({ plan, selectedId, onSelect }: Props) {
                       {r.name}
                       {r.isFastest && <span className="font-normal text-muted-foreground"> · fastest</span>}
                     </span>
-                    {r.hazardLine && (
-                      <span className="flex min-w-0 items-start gap-1.5 text-sm text-muted-foreground">
-                        <span
-                          className="mt-1.5 size-2 shrink-0 rounded-full"
-                          style={{ background: r.worst.fill }}
-                          aria-hidden
-                        />
-                        <span className="min-w-0 break-words">{r.hazardLine}</span>
-                      </span>
-                    )}
+                    <span className="flex min-w-0 items-start gap-1.5 text-sm text-muted-foreground">
+                      <span
+                        className="mt-1.5 size-2 shrink-0 rounded-full"
+                        style={{ background: r.worst.fill }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 break-words">{r.stretchShort}</span>
+                    </span>
                   </span>
                   <span className="grid shrink-0 justify-items-end gap-0.5 text-right">
                     <span className="text-base font-semibold">{r.arrivalShort}</span>

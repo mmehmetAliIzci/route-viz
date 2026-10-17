@@ -122,8 +122,10 @@ describe('TripForm', () => {
       expect(submitted(onSubmit).departure_utc).toBe(new Date('2026-10-16T09:00').toISOString())
     })
 
+    // The trip departs two hours after the real clock, so freeze time at its departure: a
+    // fixed date would fall out of the 48-hour window once the calendar moved past it.
     it('submits a custom load typed via the middle chip', async () => {
-      const { user, onSubmit } = setup('2026-10-15T10:00:00Z')
+      const { user, onSubmit } = setup(trip.departure_utc)
       await user.click(screen.getByRole('radio', { name: '38,000 lb' }))
       fireEvent.change(screen.getByLabelText('Load (lb)'), { target: { value: '45000' } })
       await user.click(screen.getByRole('button', { name: submitName }))
@@ -131,7 +133,7 @@ describe('TripForm', () => {
     })
 
     it('rejects a load over 80,000 lb', async () => {
-      const { user, onSubmit } = setup('2026-10-15T10:00:00Z')
+      const { user, onSubmit } = setup(trip.departure_utc)
       await user.click(screen.getByRole('radio', { name: '38,000 lb' }))
       fireEvent.change(screen.getByLabelText('Load (lb)'), { target: { value: '90000' } })
       await user.click(screen.getByRole('button', { name: submitName }))

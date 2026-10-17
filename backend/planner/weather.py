@@ -12,6 +12,7 @@ wind vector (u, v), never by averaging degrees, so 350 and 10 meet at 0, not 180
 
 import math
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,7 +22,9 @@ from planner.http import Deadline, ProviderError, cached_json
 URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "icon_seamless"  # DWD ICON, the model Zoom Earth shows
 VARIABLES = ["wind_speed_10m", "wind_gusts_10m", "wind_direction_10m", "rain", "showers", "snowfall"]
-MAX_LOCATIONS = 1000  # per request
+MAX_LOCATIONS = 1000  # Open-Meteo's cap per request
+CHUNK_LOCATIONS = 50  # locations per request: several small requests in parallel beat one big one
+PARALLEL_REQUESTS = 4
 MPH_PER_KMH = 0.621371
 IN_PER_MM = 1 / 25.4
 IN_PER_CM = 1 / 2.54
@@ -112,11 +115,16 @@ def fetch_series(
     end: datetime,
     deadline: Deadline | None = None,
 ) -> list[Series]:
-    """Hourly series for each (lon, lat), covering [start, end]. One request per 1,000 locations."""
+    """Hourly series for each (lon, lat), covering [start, end], in the same order.
+
+    The locations go out in chunks of CHUNK_LOCATIONS, PARALLEL_REQUESTS at a time: Open-Meteo
+    answers a 50-location request in a second or two, while one 200-location request over two
+    days can take 20 seconds. Each chunk is its own cache entry.
+    """
     first, last = hour_window(start, end)
-    out: list[Series] = []
-    for i in range(0, len(locations), MAX_LOCATIONS):
-        chunk = locations[i : i + MAX_LOCATIONS]
+    chunks = [locations[i : i + CHUNK_LOCATIONS] for i in range(0, len(locations), CHUNK_LOCATIONS)]
+
+    def fetch(chunk: Sequence[tuple[float, float]]) -> list[Series]:
         params = {
             "latitude": ",".join(f"{lat:.4f}" for _, lat in chunk),
             "longitude": ",".join(f"{lon:.4f}" for lon, _ in chunk),
@@ -128,8 +136,12 @@ def fetch_series(
             "timeformat": "unixtime",
         }
         body = cached_json("open_meteo", URL, params, deadline)
-        out.extend(parse(body if isinstance(body, list) else [body]))
-    return out
+        return parse(body if isinstance(body, list) else [body])
+
+    if len(chunks) <= 1:
+        return fetch(chunks[0]) if chunks else []
+    with ThreadPoolExecutor(max_workers=PARALLEL_REQUESTS) as pool:
+        return [series for result in pool.map(fetch, chunks) for series in result]
 
 
 def parse(bodies: list[dict[str, Any]]) -> list[Series]:
