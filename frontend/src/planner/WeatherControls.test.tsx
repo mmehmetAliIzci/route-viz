@@ -48,8 +48,6 @@ function renderControls(options: { startHour?: number; disabled?: boolean } = {}
         }}
         layer="risk"
         onLayerChange={() => {}}
-        demo="off"
-        onDemoChange={() => {}}
         disabled={options.disabled ?? false}
       />
     )

@@ -1,10 +1,11 @@
-import { CanvasSource, GeoJSONSource, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl'
+import { CanvasSource, GeoJSONSource, Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'maplibre-gl'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { HEATMAP_UPSAMPLE, paintHour, type HeatmapField, type HeatmapKind } from '../model/heatmap'
-import type { PlanView } from '../model/planView'
+import { worstHazard, type PlanView } from '../model/planView'
 import type { ResolvedTheme } from '../../theme/theme'
-import { addRouteLayers, checkpointsGeoJson, ROUTES_CASING_LAYER, routesGeoJson } from './routeLayers'
+import { destinationPin, hazardLabel, originRing, routePill } from './mapMarkers'
+import { addRouteLayers, routeLabels, ROUTES_CASING_LAYER, routesGeoJson } from './routeLayers'
 
 setWorkerUrl(workerUrl)
 
@@ -17,8 +18,8 @@ const US_CENTER: [number, number] = [-98.5, 39.5]
 const HEATMAP_SOURCE = 'heatmap'
 const HEATMAP_LAYER = 'heatmap'
 // Everything the app adds on top of the basemap, kept when the basemap changes.
-const OWN_SOURCES = new Set(['routes', 'checkpoints', HEATMAP_SOURCE])
-const OWN_LAYERS = new Set([HEATMAP_LAYER, ROUTES_CASING_LAYER, 'routes-line', 'checkpoints'])
+const OWN_SOURCES = new Set(['routes', HEATMAP_SOURCE])
+const OWN_LAYERS = new Set([HEATMAP_LAYER, ROUTES_CASING_LAYER, 'routes-line'])
 
 export type HeatmapDisplay = { field: HeatmapField; kind: HeatmapKind; hour: number }
 export type FitPadding = { top: number; bottom: number }
@@ -31,21 +32,23 @@ type Options = {
   heatmap: HeatmapDisplay | null // null hides the heatmap
   fitPadding: FitPadding // space the routes keep clear of, for panels that cover the map
   theme: ResolvedTheme // picks the basemap
+  bearing: number // compass direction that points up; 0 is north up
 }
 
 // The MapLibre lifecycle for one map. Attach the returned `container` ref to the map's
 // container; `map` is the loaded map, null until its style has loaded.
 // Effects run in this order, and the order matters:
-//   1. create the map and add its controls; on 'load' add the route and checkpoint
-//      sources and layers, then publish the map (nothing below runs before that)
+//   1. create the map and add its controls; on 'load' add the routes
+//      source and layers, then publish the map (nothing below runs before that)
 //   1b. on a theme change, swap the basemap style and carry our sources and layers over
-//   2. on plan or selection change, setData on the routes and checkpoints sources
+//   2. on plan or selection change, setData on the routes source, then rebuild
+//      the HTML markers (route pills, worst hazard, trip ends)
 //   3. on a new plan, or a resize, fit the routes in view
 //   4. heatmap canvas: when a field arrives, add the canvas source and layer under the
 //      routes; when the field goes away or changes, remove both
 //   5. paint the chosen hour into that canvas (reads the canvas step 4 created)
 //   6. on unmount, remove the map (the cleanup of step 1)
-export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding, theme }: Options): {
+export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPadding, theme, bearing }: Options): {
   container: RefObject<HTMLDivElement | null>
   map: MapLibreMap | null
 } {
@@ -92,12 +95,37 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
     })
   }, [map, theme])
 
-  // 2. Routes and checkpoints.
+  // 2. Routes, coloured by risk along the selected one.
   useEffect(() => {
     if (!map) return
     geoJsonSource(map, 'routes').setData(routesGeoJson(plan?.routes ?? [], selectedId))
-    const selected = plan?.routes.find((r) => r.id === selectedId)
-    geoJsonSource(map, 'checkpoints').setData(checkpointsGeoJson(selected))
+  }, [map, plan, selectedId])
+
+  // 2b. HTML markers: a tappable pill on each route ("Recommended", or how much later it arrives),
+  // the worst hazard on the selected route, and the two ends of the trip.
+  useEffect(() => {
+    if (!map || !plan) return
+    const markers = routeLabels(plan.routes, selectedId).map((label) =>
+      new Marker({ element: routePill(label, () => onSelectRef.current(label.routeId)) })
+        .setLngLat([label.lon, label.lat])
+        .addTo(map),
+    )
+    const selected = plan.routes.find((r) => r.id === selectedId)
+    const hazard = selected ? worstHazard(selected) : null
+    if (hazard) {
+      markers.push(
+        new Marker({ element: hazardLabel(hazard), anchor: 'bottom', offset: [0, -6] })
+          .setLngLat([hazard.lon, hazard.lat])
+          .addTo(map),
+      )
+    }
+    markers.push(
+      new Marker({ element: originRing(), anchor: 'center' }).setLngLat([plan.origin.lon, plan.origin.lat]).addTo(map),
+      new Marker({ element: destinationPin(plan.destination.label), anchor: 'bottom' })
+        .setLngLat([plan.destination.lon, plan.destination.lat])
+        .addTo(map),
+    )
+    return () => markers.forEach((m) => m.remove())
   }, [map, plan, selectedId])
 
   // 3. Fit the routes on a new plan, and again whenever the map changes size (phone rotation,
@@ -106,14 +134,18 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
     if (!map || !plan) return
     // Bottom padding keeps the routes clear of the weather controls card.
     const fit = (duration: number) =>
-      map.fitBounds(plan.bounds, { padding: { top: fitPadding.top, right: 48, bottom: fitPadding.bottom, left: 48 }, duration })
+      map.fitBounds(plan.bounds, {
+        padding: { top: fitPadding.top, right: 48, bottom: fitPadding.bottom, left: 48 },
+        bearing,
+        duration,
+      })
     fit(600)
     const onResize = () => fit(0)
     map.on('resize', onResize)
     return () => {
       map.off('resize', onResize)
     }
-  }, [map, plan, fitPadding])
+  }, [map, plan, fitPadding, bearing])
 
   // 4 and 5. Heatmap.
   const field = heatmap?.field ?? null

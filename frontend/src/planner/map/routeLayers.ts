@@ -1,14 +1,14 @@
-import { Map as MapLibreMap, Popup } from 'maplibre-gl'
-import type { RouteView } from '../model/planView'
+import { Map as MapLibreMap } from 'maplibre-gl'
+import { routeSegments, type RouteView } from '../model/planView'
 
 export const ROUTES_CASING_LAYER = 'routes-casing'
+export const UNSELECTED_ROUTE_COLOR = '#9AA3AD'
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-// Adds the route and checkpoint sources and layers, and the click and hover handlers on them.
+// Adds the routes source and its layers, and the click and hover handlers on them.
 export function addRouteLayers(map: MapLibreMap, onSelect: (routeId: number) => void) {
   map.addSource('routes', { type: 'geojson', data: EMPTY })
-  map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
 
   map.addLayer({
     id: ROUTES_CASING_LAYER,
@@ -23,76 +23,60 @@ export function addRouteLayers(map: MapLibreMap, onSelect: (routeId: number) => 
     source: 'routes',
     layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['get', 'order'] },
     paint: {
-      'line-color': ['case', ['get', 'selected'], '#0A6B4B', '#9AA3AD'],
+      'line-color': ['get', 'color'],
       'line-width': ['case', ['get', 'selected'], 5, 3],
       'line-opacity': ['case', ['get', 'selected'], 1, 0.55],
     },
   })
-  map.addLayer({
-    id: 'checkpoints',
-    type: 'circle',
-    source: 'checkpoints',
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 4, 9, 8],
-      'circle-color': ['get', 'color'],
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 1.5,
-    },
-  })
-
   map.on('click', 'routes-line', (e) => {
     const id = e.features?.[0]?.properties?.routeId
     if (typeof id === 'number') onSelect(id)
   })
-  map.on('click', 'checkpoints', (e) => {
-    const f = e.features?.[0]
-    if (!f || f.geometry.type !== 'Point') return
-    const p = f.properties
-    const [lon, lat] = f.geometry.coordinates
-    if (lon === undefined || lat === undefined) return
-    const body = document.createElement('div')
-    body.className = 'grid gap-0.5 text-sm'
-    const lines = [`${p.mile} · ${p.eta}`, `${p.level}${p.cause ? ` (${p.cause})` : ''}`, String(p.weather)]
-    lines.forEach((line, n) => {
-      const row = document.createElement('div')
-      row.textContent = line
-      if (n === 0) row.className = 'font-medium'
-      if (n === 2) row.className = 'text-xs text-muted-foreground'
-      body.append(row)
-    })
-    new Popup({ closeButton: true, maxWidth: '280px' }).setLngLat([lon, lat]).setDOMContent(body).addTo(map)
-  })
-  for (const layer of ['routes-line', 'checkpoints']) {
-    map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'))
-    map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''))
-  }
+  map.on('mouseenter', 'routes-line', () => (map.getCanvas().style.cursor = 'pointer'))
+  map.on('mouseleave', 'routes-line', () => (map.getCanvas().style.cursor = ''))
 }
 
+// The selected route is one feature per risk segment, each in its own colour; every other route is
+// one grey feature. `order` puts the selected route on top.
 export function routesGeoJson(routes: RouteView[], selectedId: number | null): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: routes.map((r) => ({
-      type: 'Feature',
-      properties: { routeId: r.id, selected: r.id === selectedId, order: r.id === selectedId ? 1 : 0 },
-      geometry: { type: 'LineString', coordinates: r.geometry },
-    })),
+    features: routes.flatMap((r): GeoJSON.Feature[] => {
+      const selected = r.id === selectedId
+      const segments = selected ? routeSegments(r) : [{ color: UNSELECTED_ROUTE_COLOR, coordinates: r.geometry }]
+      return segments.map((s) => ({
+        type: 'Feature',
+        properties: { routeId: r.id, selected, order: selected ? 1 : 0, color: s.color },
+        geometry: { type: 'LineString', coordinates: s.coordinates },
+      }))
+    }),
   }
 }
 
-export function checkpointsGeoJson(route: RouteView | undefined): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: (route?.checkpoints ?? []).map((c) => ({
-      type: 'Feature',
-      properties: {
-        color: c.level.fill,
-        mile: c.mileLabel,
-        eta: c.etaLabel,
-        level: c.level.label,
-        cause: c.causeLabel,
-        weather: c.weatherLabel,
+export type RouteLabel = {
+  routeId: number
+  lon: number
+  lat: number
+  text: string // "Recommended" or how much later or sooner than the recommended route
+  tone: 'recommended' | 'sooner' | 'later' | 'same'
+  selected: boolean
+}
+
+// One label per route at its middle, so the alternatives can be told apart and tapped.
+export function routeLabels(routes: RouteView[], selectedId: number | null): RouteLabel[] {
+  return routes.flatMap((r) => {
+    const mid = r.geometry[Math.floor(r.geometry.length / 2)]
+    if (!mid) return []
+    const [lon, lat] = mid
+    return [
+      {
+        routeId: r.id,
+        lon,
+        lat,
+        text: r.isRecommended ? 'Recommended' : (r.vsRecommended?.label ?? r.name),
+        tone: r.isRecommended ? 'recommended' : (r.vsRecommended?.tone ?? 'same'),
+        selected: r.id === selectedId,
       },
-      geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
-    })),
-  }
+    ]
+  })
 }

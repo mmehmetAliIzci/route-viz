@@ -5,17 +5,18 @@ import { decodeHeatmap, type HeatmapField } from './model/heatmap'
 import { buildPlanView, type PlanView } from './model/planView'
 import { PlannerDesktop } from './PlannerDesktop'
 import type { PlannerScreenState } from './plannerLayout'
-import { PlannerPhone } from './PlannerPhone'
+import { PHONE_PEEK_PX, PlannerPhone } from './PlannerPhone'
 import { SavedTrips } from './SavedTrips'
-import { SettingsSheet, type Spacing } from './SettingsSheet'
+import { SettingsSheet, type DemoChoice, type Spacing } from './SettingsSheet'
 import { TripForm } from './TripForm'
 import { useMediaQuery } from './useMediaQuery'
-import { WeatherControls, type DemoChoice, type LayerChoice } from './WeatherControls'
+import type { LayerChoice, WeatherControlsProps } from './WeatherControls'
 
 // MapLibre is most of the bundle; load it after the form has rendered.
 const PlanMap = lazy(() => import('./PlanMap').then((m) => ({ default: m.PlanMap })))
 
-const PHONE_TOP_COVER = 300 // px: top bar plus weather card with its demo row and demo line
+// Phone: the routes are fitted between the top bar and the forecast card above the resting sheet.
+const PHONE_FIT_PADDING = { top: 72, bottom: PHONE_PEEK_PX + 12 + 136 } // card: legend, label, slider, day ticks
 
 type PlanRequest = { kind: 'live'; trip: TripInput } | { kind: 'saved'; sampleId: string }
 type ShownPlan = { view: PlanView; field: HeatmapField }
@@ -62,10 +63,9 @@ export function PlannerScreen() {
   )
 
   // On a phone the top bar and weather card cover the top of the map and the sheet, half open, the bottom.
-  const fitPadding = useMemo(
-    () => (isDesktop ? undefined : { top: PHONE_TOP_COVER, bottom: Math.round(window.innerHeight * 0.45) }),
-    [isDesktop],
-  )
+  // Phones start with the trip running up the screen, so a long corridor fills the tall viewport.
+  const [routeUp, setRouteUp] = useState(!isDesktop)
+  const fitPadding = isDesktop ? undefined : PHONE_FIT_PADDING
 
   function request(next: PlanRequest, scenario: DemoChoice = demo) {
     setLastRequest(next)
@@ -90,6 +90,19 @@ export function PlannerScreen() {
     if (lastRequest && view) request(lastRequest, next)
   }
 
+  const weatherControls: WeatherControlsProps | null =
+    view && field
+      ? {
+          plan: view,
+          hours: field.hours,
+          hour,
+          onHourChange: setHour,
+          layer,
+          onLayerChange: setLayer,
+          disabled: plan.isPending,
+        }
+      : null
+
   const layout = {
     screen,
     view,
@@ -107,29 +120,21 @@ export function PlannerScreen() {
           onSelectRoute={setPickedId}
           heatmap={heatmap}
           fitPadding={fitPadding}
+          bearing={routeUp && view ? view.travelBearing : 0}
         />
       </Suspense>
     ),
-    weather:
-      view && field ? (
-        <WeatherControls
-          plan={view}
-          hours={field.hours}
-          hour={hour}
-          onHourChange={setHour}
-          layer={layer}
-          onLayerChange={setLayer}
-          demo={demo}
-          onDemoChange={chooseDemo}
-          disabled={plan.isPending}
-        />
-      ) : null,
+    weather: weatherControls,
+    orientation: { routeUp, toggle: () => setRouteUp((v) => !v) },
     form: <TripForm initial={trip} isPlanning={plan.isPending} spacingMi={spacingMi} onSubmit={submit} />,
     savedTrips: <SavedTrips disabled={plan.isPending} onOpen={openSaved} />,
     settings: (
       <SettingsSheet
         spacingMi={spacingMi}
         onSpacingChange={setSpacingMi}
+        demo={demo}
+        onDemoChange={chooseDemo}
+        demoDisabled={plan.isPending}
         triggerClassName={isDesktop ? undefined : 'rounded-full bg-card shadow-md hover:bg-card'}
       />
     ),

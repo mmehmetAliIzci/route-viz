@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import fixture from '../../test/plan-kc-den.json'
 import { parsePlan } from '../../api/planApi'
 import { decodeHeatmap, HEATMAP_UPSAMPLE } from '../model/heatmap'
-import { buildPlanView } from '../model/planView'
+import { LEVELS, buildPlanView, worstHazard } from '../model/planView'
 import type { StyleSpecification, StyleSwapOptions } from 'maplibre-gl'
 import type { ResolvedTheme } from '../../theme/theme'
 import { useMapLibre, type FitPadding, type HeatmapDisplay } from './useMapLibre'
@@ -16,6 +16,7 @@ const fake = vi.hoisted(() => {
     sources: new Map<string, unknown>(),
     layers: new Set<string>(),
     handlers: new Map<string, () => void>(),
+    markers: [] as { element: HTMLElement; anchor?: string; offset?: [number, number]; lngLat?: [number, number]; removed: boolean }[],
   }
   class GeoJSONSource {
     setData = vi.fn((data: unknown) => void calls.push(`setData:${JSON.stringify(data).length}`))
@@ -55,7 +56,22 @@ const fake = vi.hoisted(() => {
     setStyle = vi.fn((url: string, _options?: StyleSwapOptions) => void calls.push(`setStyle:${url}`))
     remove = vi.fn(() => void calls.push('remove'))
   }
-  return { calls, state, GeoJSONSource, CanvasSource, FakeMap }
+  class Marker {
+    entry: (typeof state.markers)[number]
+    constructor(options: { element: HTMLElement; anchor?: string; offset?: [number, number] }) {
+      this.entry = { ...options, removed: false }
+      state.markers.push(this.entry)
+    }
+    setLngLat = (lngLat: [number, number]) => {
+      this.entry.lngLat = lngLat
+      return this
+    }
+    addTo = () => this
+    remove = () => {
+      this.entry.removed = true
+    }
+  }
+  return { calls, state, GeoJSONSource, CanvasSource, FakeMap, Marker }
 })
 
 vi.mock('maplibre-gl', () => ({
@@ -64,6 +80,7 @@ vi.mock('maplibre-gl', () => ({
   CanvasSource: fake.CanvasSource,
   NavigationControl: class {},
   Popup: class {},
+  Marker: fake.Marker,
   setWorkerUrl: () => {},
 }))
 
@@ -81,7 +98,7 @@ type Props = {
 }
 
 function Harness({ onSelectRoute = () => {}, theme = 'light', ...rest }: Props) {
-  const { container } = useMapLibre({ ...rest, onSelectRoute, fitPadding, theme })
+  const { container } = useMapLibre({ ...rest, onSelectRoute, fitPadding, theme, bearing: 0 })
   return <div ref={container} />
 }
 
@@ -98,6 +115,7 @@ beforeEach(() => {
   fake.state.sources.clear()
   fake.state.layers.clear()
   fake.state.handlers.clear()
+  fake.state.markers.length = 0
   // jsdom has no canvas; the paint effect only needs these two calls.
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     createImageData,
@@ -114,35 +132,63 @@ describe('useMapLibre', () => {
     expect(fake.calls).toEqual([])
 
     await loadMap()
-    expect(fake.calls.slice(0, 5)).toEqual([
-      'addSource:routes',
-      'addSource:checkpoints',
-      'addLayer:routes-casing',
-      'addLayer:routes-line',
-      'addLayer:checkpoints',
-    ])
+    expect(fake.calls.slice(0, 3)).toEqual(['addSource:routes', 'addLayer:routes-casing', 'addLayer:routes-line'])
+    expect(fake.state.sources.has('checkpoints')).toBe(false)
   })
 
-  it('sets route and checkpoint data when the plan or the selection changes', async () => {
+  it('sets route data when the plan or the selection changes', async () => {
     const { rerender } = render(<Harness plan={null} selectedId={null} heatmap={null} />)
     await loadMap()
     const routes = sourceAt('routes')
-    const checkpoints = sourceAt('checkpoints')
     expect(routes.setData).toHaveBeenCalledTimes(1) // empty collections once the map is ready
 
     rerender(<Harness plan={view} selectedId={view.verdict.routeId} heatmap={null} />)
     expect(routes.setData).toHaveBeenCalledTimes(2)
     const shown = routes.setData.mock.calls[1]?.[0] as GeoJSON.FeatureCollection
-    expect(shown.features).toHaveLength(view.routes.length)
     const selected = shown.features.filter((f) => f.properties?.selected)
-    expect(selected.map((f) => f.properties?.routeId)).toEqual([view.verdict.routeId])
-    const dots = checkpoints.setData.mock.calls[1]![0] as GeoJSON.FeatureCollection
-    expect(dots.features.length).toBeGreaterThan(0)
+    expect(selected.length).toBeGreaterThanOrEqual(1)
+    expect(new Set(selected.map((f) => f.properties?.routeId))).toEqual(new Set([view.verdict.routeId]))
+    expect(selected.every((f) => typeof f.properties?.color === 'string')).toBe(true)
+    const unselected = shown.features.filter((f) => !f.properties?.selected)
+    expect(unselected).toHaveLength(view.routes.length - 1) // one grey feature per other route
+    expect(unselected.every((f) => f.properties?.color === '#9AA3AD')).toBe(true)
 
     const other = view.routes.find((r) => !r.isRecommended)!
     rerender(<Harness plan={view} selectedId={other.id} heatmap={null} />)
     expect(routes.setData).toHaveBeenCalledTimes(3)
     expect(theMap().fitBounds).toHaveBeenCalledTimes(1) // a new selection does not refit
+  })
+
+  it('puts a pill on each route, the two trip ends, and the worst hazard of the selected route', async () => {
+    const base = view.routes[0]!
+    const severe = { ...base.checkpoints[1]!, level: LEVELS.severe, causeLabel: 'Rain', etaShort: '10:00 PM' }
+    const selected = { ...base, checkpoints: [base.checkpoints[0]!, severe, ...base.checkpoints.slice(2)] }
+    const hazardView = { ...view, routes: [selected, ...view.routes.slice(1)] }
+    const hazard = worstHazard(selected)!
+    expect(hazard).toBe(severe)
+    render(<Harness plan={hazardView} selectedId={selected.id} heatmap={null} />)
+    await loadMap()
+    {
+      const live = fake.state.markers.filter((m) => !m.removed)
+      const text = live.map((m) => m.element.textContent)
+      expect(live.filter((m) => m.element.tagName === 'BUTTON')).toHaveLength(view.routes.length)
+      expect(text).toContain(view.destination.label)
+      expect(text.some((t) => t?.includes('Start'))).toBe(true)
+      const label = live.find((m) => m.element.textContent?.includes(`${hazard.level.label}`) && m.anchor === 'bottom' && m.offset)
+      expect(label?.element.textContent).toBe('Severe rain · 10:00 PM')
+      expect(label?.lngLat).toEqual([hazard.lon, hazard.lat])
+      expect(live).toHaveLength(view.routes.length + 3)
+    }
+  })
+
+  it('shows no hazard label when the selected route is clear, and rebuilds markers on selection', async () => {
+    const clearRoute = { ...view.routes[0]!, checkpoints: view.routes[0]!.checkpoints.filter((c) => c.level.rank === 0) }
+    const clearView = { ...view, routes: [clearRoute, ...view.routes.slice(1)] }
+    const { rerender } = render(<Harness plan={clearView} selectedId={clearRoute.id} heatmap={null} />)
+    await loadMap()
+    expect(fake.state.markers.filter((m) => !m.removed)).toHaveLength(view.routes.length + 2)
+    rerender(<Harness plan={clearView} selectedId={view.routes[1]!.id} heatmap={null} />)
+    expect(fake.state.markers.filter((m) => m.removed)).toHaveLength(view.routes.length + 2)
   })
 
   it('fits the plan bounds and refits on resize', async () => {
@@ -203,6 +249,7 @@ describe('useMapLibre', () => {
         plan: null,
         selectedId: null,
         heatmap: null,
+        bearing: 0,
         onSelectRoute: () => {},
         fitPadding,
         theme: 'light',

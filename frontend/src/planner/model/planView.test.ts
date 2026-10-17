@@ -1,6 +1,20 @@
 import fixture from '../../test/plan-kc-den.json'
 import { parsePlan } from '../../api/planApi'
-import { LEVELS, buildPlanView, compassPoint, formatClock, formatDuration, formatTime, hourLabel, vsRecommendedLabel } from './planView'
+import {
+  LEVELS,
+  LOW_ROUTE_COLOR,
+  buildPlanView,
+  compassPoint,
+  formatClock,
+  formatDuration,
+  formatTime,
+  hourLabel,
+  routeSegments,
+  vsRecommendedLabel,
+  worstHazard,
+  type CheckpointView,
+  type RouteView,
+} from './planView'
 
 const plan = parsePlan(fixture)
 
@@ -222,5 +236,80 @@ describe('checkpoint weather label', () => {
   it('leaves the direction out for an older plan without it', () => {
     const label = withCheckpoint({ ...first, wind_mph: 22.4, gust_mph: 30.2, wind_dir_deg: undefined })
     expect(label).toMatch(/^Wind 22 mph \(gusts 30\) · Rain /)
+  })
+})
+
+// A straight west-to-east road of 11 vertices at the equator, one degree apart.
+const road: [number, number][] = Array.from({ length: 11 }, (_, i) => [i, 0])
+
+function checkpoint(vertex: number, level: keyof typeof LEVELS, cause: string | null = null): CheckpointView {
+  return {
+    id: `c${vertex}`,
+    lon: vertex,
+    lat: 0.1, // just off the road, nearest to this vertex
+    mileLabel: `Mile ${vertex}`,
+    etaLabel: 'Fri, 10:00 PM CDT',
+    etaShort: '10:00 PM',
+    level: LEVELS[level],
+    causeLabel: cause,
+    weatherLabel: '',
+  }
+}
+
+function route(checkpoints: CheckpointView[]): RouteView {
+  return { ...buildPlanView(plan).routes[0]!, geometry: road, checkpoints }
+}
+
+describe('routeSegments', () => {
+  it('is one green segment over every vertex when all checkpoints are Low', () => {
+    const segments = routeSegments(route([checkpoint(0, 'low'), checkpoint(5, 'low'), checkpoint(10, 'low')]))
+    expect(segments).toEqual([{ color: LOW_ROUTE_COLOR, coordinates: road }])
+  })
+
+  it('is one green segment for a route with no checkpoints', () => {
+    expect(routeSegments(route([]))).toEqual([{ color: LOW_ROUTE_COLOR, coordinates: road }])
+  })
+
+  it('gives a Moderate checkpoint in the middle its own segment, sharing boundary vertices', () => {
+    const segments = routeSegments(route([checkpoint(0, 'low'), checkpoint(5, 'moderate'), checkpoint(10, 'low')]))
+    expect(segments.map((s) => s.color)).toEqual([LOW_ROUTE_COLOR, LEVELS.moderate.fill, LOW_ROUTE_COLOR])
+    const [first, middle, last] = segments.map((s) => s.coordinates)
+    expect(first![0]).toEqual(road[0])
+    expect(last!.at(-1)).toEqual(road[10])
+    expect(first!.at(-1)).toEqual(middle![0]) // no gap
+    expect(middle!.at(-1)).toEqual(last![0])
+    // Every vertex once, except the two shared boundary vertices.
+    expect(first!.length + middle!.length + last!.length).toBe(road.length + 2)
+    expect([...first!, ...middle!.slice(1), ...last!.slice(1)]).toEqual(road)
+  })
+
+  it('merges neighbouring checkpoints of the same colour', () => {
+    const segments = routeSegments(
+      route([checkpoint(1, 'low'), checkpoint(3, 'high'), checkpoint(5, 'high'), checkpoint(9, 'low')]),
+    )
+    expect(segments.map((s) => s.color)).toEqual([LOW_ROUTE_COLOR, LEVELS.high.fill, LOW_ROUTE_COLOR])
+  })
+
+  it('drops a stretch with no length when two checkpoints sit on one vertex', () => {
+    const segments = routeSegments(route([checkpoint(5, 'low'), checkpoint(5, 'high'), checkpoint(5, 'low')]))
+    expect(segments.every((s) => s.coordinates.length >= 2)).toBe(true)
+  })
+})
+
+describe('worstHazard', () => {
+  it('is the highest level above Low, the first on ties, and null on a clear route', () => {
+    const a = checkpoint(2, 'high', 'Wind')
+    const b = checkpoint(6, 'high', 'Rain')
+    const c = checkpoint(8, 'moderate')
+    expect(worstHazard(route([checkpoint(0, 'low'), c, a, b]))).toBe(a)
+    expect(worstHazard(route([checkpoint(0, 'low')]))).toBeNull()
+  })
+})
+
+describe('trip ends', () => {
+  it('carries the origin and destination of the plan', () => {
+    const view = buildPlanView(plan)
+    expect(view.origin).toEqual({ label: plan.trip.origin.label, lon: plan.trip.origin.lon, lat: plan.trip.origin.lat })
+    expect(view.destination.label).toBe(plan.trip.destination.label)
   })
 })

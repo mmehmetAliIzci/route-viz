@@ -1,3 +1,4 @@
+import { ChevronUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PlanView } from './model/planView'
 
@@ -50,5 +51,21 @@ export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapR
         </Button>
       )}
     </section>
+  )
+}
+
+// The verdict in one line, for the phone sheet at rest. Tapping it opens the cards.
+export function VerdictLine({ plan, onClick }: { plan: PlanView; onClick: () => void }) {
+  const { verdict } = plan
+  return (
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-2 text-left" aria-label="Show routes">
+      <span className="grid min-w-0 flex-1 gap-0.5">
+        <span className="truncate text-base font-semibold">{verdict.headline}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          Arrive {verdict.arrivalLabel} · {verdict.reason}
+        </span>
+      </span>
+      <ChevronUp className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+    </button>
   )
 }

@@ -97,19 +97,21 @@ describe('PlannerScreen on a phone', () => {
     expect(edit).toHaveFocus()
   })
 
-  it('shows the sheet full while editing and back at half once the new plan arrives', async () => {
+  it('shows the sheet full while editing and back at the verdict line once the new plan arrives', async () => {
     renderScreen()
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     await screen.findByTestId('map')
     const snap = () => document.querySelector('[data-snap]')?.getAttribute('data-snap')
-    expect(snap()).toBe('0.5')
+    expect(snap()).toBe('92px')
+    await userEvent.click(screen.getByRole('button', { name: 'Show routes' }))
+    expect(snap()).toBe('0.55')
     await userEvent.click(screen.getByRole('button', { name: 'Show on map' }))
-    expect(snap()).toBe('100px')
+    expect(snap()).toBe('92px')
     await userEvent.click(screen.getByRole('button', { name: 'Edit trip' }))
     expect(snap()).toBe('1')
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     await screen.findByRole('heading', { name: /^Take / })
-    expect(snap()).toBe('0.5')
+    expect(snap()).toBe('92px')
   })
 
   it('keeps the old plan visible and busy while a saved trip loads again', async () => {
@@ -127,19 +129,23 @@ describe('PlannerScreen on a phone', () => {
     renderScreen()
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     await screen.findByTestId('map')
-    const demoGroup = screen.getByRole('radiogroup', { name: 'Demo weather' })
     const layerGroup = screen.getByRole('radiogroup', { name: 'Map weather layer' })
     expect(within(layerGroup).getByRole('radio', { name: 'Risk' })).toBeChecked()
     expect(screen.queryByText(demoLine)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' })) // demo weather lives in Settings
+    const demoGroup = await screen.findByRole('radiogroup', { name: 'Demo weather' })
 
     await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Wind' }))
     expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', 'wind')
     expect(await screen.findByText(demoLine)).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}') // the open sheet hides the map controls from assistive tech
     expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked()
 
-    await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Off' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    await userEvent.click(within(await screen.findByRole('radiogroup', { name: 'Demo weather' })).getByRole('radio', { name: 'Off' }))
     expect(planApi.getSample).toHaveBeenLastCalledWith('kc-den', undefined)
     await waitFor(() => expect(screen.queryByText(demoLine)).not.toBeInTheDocument())
+    await userEvent.keyboard('{Escape}')
     expect(within(layerGroup).getByRole('radio', { name: 'Wind' })).toBeChecked() // turning demo off keeps the layer
   })
 
@@ -148,7 +154,8 @@ describe('PlannerScreen on a phone', () => {
     await userEvent.click(await screen.findByRole('button', { name: savedName }))
     await screen.findByTestId('map')
     vi.mocked(planApi.getSample).mockReturnValue(new Promise(() => {}))
-    const demoGroup = screen.getByRole('radiogroup', { name: 'Demo weather' })
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    const demoGroup = await screen.findByRole('radiogroup', { name: 'Demo weather' })
     await userEvent.click(within(demoGroup).getByRole('radio', { name: 'Rain' }))
     expect(within(demoGroup).getByRole('radio', { name: 'Snow' })).toBeDisabled()
   })

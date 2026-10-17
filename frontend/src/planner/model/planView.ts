@@ -1,4 +1,12 @@
-import { browserTimeZone, type DemoScenario, type Level, type Plan, type PlanCheckpoint, type PlanRoute } from '../../api/planApi'
+import {
+  browserTimeZone,
+  type DemoScenario,
+  type Level,
+  type Place,
+  type Plan,
+  type PlanCheckpoint,
+  type PlanRoute,
+} from '../../api/planApi'
 
 // Projection from the API plan to what the route list and the map render. Both read only this.
 
@@ -15,12 +23,16 @@ export const LEVELS: Record<Level, LevelView> = {
   no_travel: { key: 'no_travel', label: 'No travel', fill: '#3E1F5C', ink: WHITE, rank: 4 },
 }
 
+// The colour of a route's clear stretches, and of the selected route's line overall.
+export const LOW_ROUTE_COLOR = '#0A6B4B'
+
 export type CheckpointView = {
   id: string
   lon: number
   lat: number
   mileLabel: string
-  etaLabel: string
+  etaLabel: string // "Fri, 10:00 PM CDT"
+  etaShort: string // "10:00 PM"
   level: LevelView
   causeLabel: string | null
   weatherLabel: string
@@ -55,6 +67,8 @@ export type Verdict = {
 export type PlanView = {
   tripLabel: string // "Kansas City, MO → Denver, CO · 38,000 lb"
   savedLabel: string | null // "Saved trip recorded Thu, Oct 15" for saved trips
+  origin: Place
+  destination: Place
   viewerTz: string // every time label is in this zone, not the origin's
   departureUtc: string
   routes: RouteView[]
@@ -63,6 +77,7 @@ export type PlanView = {
   forecastLabel: string // says "Demo weather" when the plan is synthetic
   demo: DemoScenario | null // the synthetic storm behind this plan; null for a real forecast
   bounds: [[number, number], [number, number]]
+  travelBearing: number // compass heading from origin to destination, for a route-up map
 }
 
 export function buildPlanView(plan: Plan): PlanView {
@@ -75,6 +90,8 @@ export function buildPlanView(plan: Plan): PlanView {
   return {
     tripLabel: `${plan.trip.origin.label} → ${plan.trip.destination.label} · ${plan.trip.load_lb.toLocaleString('en-US')} lb`,
     savedLabel: plan.sample ? `Saved trip, recorded ${formatDate(plan.sample.recorded_utc, tz)}` : null,
+    origin: placeView(plan.trip.origin),
+    destination: placeView(plan.trip.destination),
     viewerTz: tz,
     departureUtc: plan.trip.departure_utc,
     routes,
@@ -89,7 +106,12 @@ export function buildPlanView(plan: Plan): PlanView {
     forecastLabel: plan.demo ? demoLabel(plan.demo) : forecastLabel(plan.weather),
     demo: plan.demo ?? null,
     bounds: boundsOf(plan.routes),
+    travelBearing: headingDeg(plan.trip.origin, plan.trip.destination),
   }
+}
+
+function placeView(p: Place): Place {
+  return { label: p.label, lon: p.lon, lat: p.lat }
 }
 
 function routeView(
@@ -124,6 +146,7 @@ function checkpointView(c: PlanCheckpoint, id: string, tz: string): CheckpointVi
     lat: c.lat,
     mileLabel: `Mile ${Math.round(c.mile)}`,
     etaLabel: formatTime(c.eta_utc, tz),
+    etaShort: formatClock(c.eta_utc, tz),
     level: LEVELS[c.level],
     causeLabel: c.cause ? c.cause.charAt(0).toUpperCase() + c.cause.slice(1) : null,
     weatherLabel: `Wind ${Math.round(c.wind_mph)} mph${c.wind_dir_deg === undefined ? '' : ` from ${compassPoint(c.wind_dir_deg)}`} (gusts ${Math.round(c.gust_mph)}) · Rain ${c.rain_in_hr.toFixed(2)} in/hr · Snow ${c.snow_in_hr.toFixed(1)} in/hr`,
@@ -206,4 +229,70 @@ function formatDate(iso: string, timeZone: string): string {
 // The name of the route the map currently shows.
 export function selectedRouteName(plan: PlanView, routeId: number): string | undefined {
   return plan.routes.find((r) => r.id === routeId)?.name
+}
+
+// Initial great-circle heading from `a` to `b`, in degrees clockwise from north, in [0, 360).
+export function headingDeg(a: { lon: number; lat: number }, b: { lon: number; lat: number }): number {
+  const toRad = Math.PI / 180
+  const dLon = (b.lon - a.lon) * toRad
+  const lat1 = a.lat * toRad
+  const lat2 = b.lat * toRad
+  const y = Math.sin(dLon) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+  return ((Math.atan2(y, x) / toRad) + 360) % 360
+}
+
+export type RouteSegment = { color: string; coordinates: [number, number][] }
+
+// The route line split by risk. Each checkpoint owns the stretch of road nearest to it: the
+// boundary between two checkpoints is the midpoint of their nearest vertices. Neighbours with the
+// same colour merge, and a boundary vertex belongs to both segments so the line has no gaps.
+// Clear (Low) checkpoints use the route green rather than the level's own colour.
+export function routeSegments(route: RouteView): RouteSegment[] {
+  const { geometry, checkpoints } = route
+  const last = geometry.length - 1
+  if (checkpoints.length === 0 || last < 1) return [{ color: LOW_ROUTE_COLOR, coordinates: geometry }]
+
+  // Nearest vertex per checkpoint, never moving backwards so a looping route keeps its order.
+  let floor = 0
+  const owned = checkpoints.map((c) => {
+    floor = Math.max(floor, nearestVertex(geometry, c))
+    return { index: floor, color: c.level.rank === 0 ? LOW_ROUTE_COLOR : c.level.fill }
+  })
+
+  const runs: { color: string; start: number; end: number }[] = []
+  owned.forEach((c, i) => {
+    const start = i === 0 ? 0 : Math.floor(((owned[i - 1]?.index ?? 0) + c.index) / 2)
+    const end = i === owned.length - 1 ? last : Math.floor((c.index + (owned[i + 1]?.index ?? last)) / 2)
+    const previous = runs[runs.length - 1]
+    if (previous?.color === c.color) previous.end = end
+    else runs.push({ color: c.color, start, end })
+  })
+  return runs
+    .filter((r) => r.end > r.start) // two checkpoints on one vertex leave a stretch with no length
+    .map((r) => ({ color: r.color, coordinates: geometry.slice(r.start, r.end + 1) }))
+}
+
+// Index of the geometry vertex closest to the checkpoint, with longitude scaled by cos(lat).
+function nearestVertex(geometry: [number, number][], at: { lon: number; lat: number }): number {
+  const kx = Math.cos((at.lat * Math.PI) / 180)
+  let best = 0
+  let bestD = Infinity
+  geometry.forEach(([lon, lat], i) => {
+    const d = ((lon - at.lon) * kx) ** 2 + (lat - at.lat) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = i
+    }
+  })
+  return best
+}
+
+// The highest-level checkpoint above Low (the first on ties), or null when the route is clear.
+export function worstHazard(route: RouteView): CheckpointView | null {
+  let worst: CheckpointView | null = null
+  for (const c of route.checkpoints) {
+    if (c.level.rank > 0 && c.level.rank > (worst?.level.rank ?? 0)) worst = c
+  }
+  return worst
 }

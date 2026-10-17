@@ -6,6 +6,7 @@ import type { PlannerLayoutProps } from './plannerLayout'
 import { RouteRows } from './RouteRows'
 import { PlanError, TripPanel } from './TripPanel'
 import { VerdictCard } from './VerdictCard'
+import { WeatherControls } from './WeatherControls'
 
 // Desktop: a 440 px panel on the left, the map on the rest. The map is there from the start.
 export function PlannerDesktop(props: PlannerLayoutProps) {
@@ -43,7 +44,7 @@ export function PlannerDesktop(props: PlannerLayoutProps) {
       </aside>
       <main className="relative min-w-0 flex-1">
         {map}
-        {weather}
+        {weather && <WeatherControls {...weather} />}
       </main>
     </div>
   )
