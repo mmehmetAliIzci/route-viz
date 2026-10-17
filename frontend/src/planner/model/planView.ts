@@ -69,6 +69,7 @@ export type Verdict = {
   stretchLine: string // the stretch as a sentence, or the clear-day sentence
   whyLine: string // how this route beat the runner-up, in one short sentence
   tradeoff: string | null // when another road is at least an hour faster: what it saves and what it costs
+  leaveLater: string | null // when waiting would help: the smallest later departure and what it changes
   loadNote: string | null // the wind rule for this load, when wind is what the driver will hit
 }
 
@@ -128,6 +129,7 @@ export function buildPlanView(plan: Plan): PlanView {
       stretchLine: stretchSentence(best.stretch, plan.trip.origin.label, plan.trip.destination.label),
       whyLine: whyLine(plan, routes),
       tradeoff: tradeoffLine(plan, routes),
+      leaveLater: leaveLaterLine(plan, recommended, tz),
       loadNote: best.stretch?.cause === 'wind' ? loadNote(plan.trip.load_lb) : null,
     },
     departureLabel: formatTime(plan.trip.departure_utc, tz),
@@ -443,4 +445,24 @@ export function tradeoffLine(plan: Plan, routes: RouteView[]): string | null {
     }
   }
   return `Trade-off: ${faster.name} is ${saved} faster, but scores higher average risk.`
+}
+
+// "Leave 6 h later, at Sat 10:00 PM: 50 mi of No Travel weather instead of 100." or
+// "Leave 12 h later, at Sun 4:00 AM: no No Travel weather (now 67 mi)."
+export function leaveLaterLine(plan: Plan, recommended: PlanRoute, tz: string): string | null {
+  const w = plan.recommendation.leave_later
+  if (!w) return null
+  const now = recommended.summary
+  const levels: [keyof typeof now & keyof typeof w, string][] = [
+    ['no_travel_mi', 'No Travel'],
+    ['severe_mi', 'Severe'],
+    ['high_mi', 'High'],
+  ]
+  const improved = levels.find(([key]) => Number(w[key]) < Number(now[key]))
+  if (!improved) return null
+  const [key, word] = improved
+  const before = Math.round(Number(now[key]))
+  const after = Math.round(Number(w[key]))
+  const change = after === 0 ? `no ${word} weather (now ${before} mi)` : `${after} mi of ${word} weather instead of ${before}`
+  return `Leave ${w.shift_h} h later, at ${formatTime(w.departure_utc, tz)}: ${change}.`
 }

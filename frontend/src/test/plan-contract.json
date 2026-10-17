@@ -22797,7 +22797,8 @@
         "hazard": null
       }
     ],
-    "close_call": false
+    "close_call": false,
+    "leave_later": null
   },
   "weather": {
     "model": "icon_seamless",

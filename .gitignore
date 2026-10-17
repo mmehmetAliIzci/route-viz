@@ -19,13 +19,17 @@ node_modules/
 # The user's global gitignore ignores Makefile; this repository's are tracked.
 !Makefile
 
-# Screenshots never go into the repository (user rule). Un-ignore a real app asset by path if one is ever needed.
+# Screenshots never go into the repository (user rule), except the README's own pictures under docs/readme/.
 *.png
 *.jpg
 *.jpeg
 *.webp
 *.gif
 screenshots/
+!docs/readme/
+!docs/readme/*.png
+!docs/readme/*.jpg
+!docs/readme/*.gif
 
 # Local visual docs (visualize-repo)
 .agent-native/

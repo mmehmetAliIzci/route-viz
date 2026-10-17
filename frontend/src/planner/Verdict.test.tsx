@@ -33,6 +33,20 @@ describe('VerdictCard', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(`Trade-off: ${b!.name} is 5 h 6 min faster, but has 50 more mi of No travel weather (238 vs 188).`)
   })
 
+  it('offers a later departure when the plan has one', () => {
+    const recommended = plan.routes.find((r) => r.id === plan.recommendation.route_id)!
+    const withLater = buildPlanView({
+      ...plan,
+      routes: plan.routes.map((r) => (r.id === recommended.id ? { ...r, summary: { ...r.summary, no_travel_mi: 67.3, max_level: 'no_travel' as const } } : r)),
+      recommendation: {
+        ...plan.recommendation,
+        leave_later: { shift_h: 12, departure_utc: '2026-10-17T02:00:00Z', no_travel_mi: 0, severe_mi: 0, high_mi: 0, max_level: 'low' as const },
+      },
+    })
+    render(<VerdictCard plan={withLater} />)
+    expect(screen.getByRole('status')).toHaveTextContent(/^Leave 12 h later, at .*: no No Travel weather \(now 67 mi\)\.$/)
+  })
+
   it('shows Show on map only when a handler is given', async () => {
     const onShowOnMap = vi.fn()
     const { rerender } = render(<VerdictCard plan={view} />)

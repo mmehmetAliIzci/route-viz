@@ -16,6 +16,7 @@ import {
   stretchSentence,
   loadNote,
   tradeoffLine,
+  leaveLaterLine,
   type CheckpointView,
   type RouteView,
 } from './planView'
@@ -395,5 +396,31 @@ describe('tradeoffLine', () => {
   it('ignores roads less than an hour faster', () => {
     const close = { ...plan, routes: [{ ...a!, duration_s: hours(10) }, { ...b!, duration_s: hours(9.2) }, { ...c!, duration_s: hours(11) }] }
     expect(tradeoffLine(close, buildPlanView(close).routes)).toBeNull()
+  })
+})
+
+describe('leaveLaterLine', () => {
+  const recommended = plan.routes.find((r) => r.id === plan.recommendation.route_id)!
+  const stormy = { ...recommended, summary: { ...recommended.summary, no_travel_mi: 67.3, max_level: 'no_travel' as const } }
+  const later = (over: object) => ({
+    ...plan,
+    recommendation: {
+      ...plan.recommendation,
+      leave_later: { shift_h: 12, departure_utc: '2026-10-17T02:00:00Z', no_travel_mi: 0, severe_mi: 0, high_mi: 0, max_level: 'low' as const, ...over },
+    },
+  })
+
+  it('is null when the plan has no later departure to offer', () => {
+    expect(buildPlanView(plan).verdict.leaveLater).toBeNull()
+  })
+
+  it('says the storm is avoided when the miles drop to zero', () => {
+    expect(leaveLaterLine(later({}), stormy, 'America/Chicago')).toBe('Leave 12 h later, at Fri, 9:00 PM CDT: no No Travel weather (now 67 mi).')
+  })
+
+  it('gives before and after miles when the storm only shrinks', () => {
+    expect(leaveLaterLine(later({ shift_h: 6, no_travel_mi: 25, max_level: 'no_travel' }), stormy, 'America/Chicago')).toContain(
+      'Leave 6 h later, at Fri, 9:00 PM CDT: 25 mi of No Travel weather instead of 67.',
+    )
   })
 })

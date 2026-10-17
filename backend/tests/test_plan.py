@@ -54,8 +54,9 @@ def test_recommendation_is_explained(kc_den: dict) -> None:
     rec, routes = kc_den["recommendation"], kc_den["routes"]
     assert set(rec) == {
         "route_id", "runner_up_id", "decided_by", "time_vs_runner_up_s",
-        "headline", "reason", "why_not", "close_call",
+        "headline", "reason", "why_not", "close_call", "leave_later",
     }  # fmt: skip
+    assert rec["leave_later"] is None  # the recorded day was clear, so waiting changes nothing
     assert len(rec["why_not"]) == len(routes) - 1
     assert rec["headline"] == f"Take {routes[rec['route_id']]['name']}"
     assert all("moderate_mi" in r["summary"] for r in routes)
@@ -162,3 +163,15 @@ def test_demo_recommendation_matches_the_summaries(kc_den_wind: dict) -> None:
     test_recommendation_matches_the_summaries(kc_den_wind)
     test_recommendation_is_explained(kc_den_wind)
     test_summary_miles_never_exceed_the_route(kc_den_wind)
+
+
+def test_leave_later_is_null_or_an_improvement_with_a_fixed_shape() -> None:
+    # The demo front sweeps the whole corridor, so a trip meets it whenever it leaves; the field
+    # is then null. When it is not null it must beat the current departure on No Travel miles.
+    body = build_kc_den(demo="wind")
+    waiting = body["recommendation"]["leave_later"]
+    best = next(r for r in body["routes"] if r["id"] == body["recommendation"]["route_id"])
+    if waiting is not None:
+        assert waiting["shift_h"] in (3, 6, 12, 24)
+        assert waiting["no_travel_mi"] <= best["summary"]["no_travel_mi"]
+        assert set(waiting) == {"shift_h", "departure_utc", "no_travel_mi", "severe_mi", "high_mi", "max_level"}

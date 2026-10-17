@@ -12,7 +12,7 @@ from typing import Any
 from timezonefinder import TimezoneFinder
 
 from planner import demo as demo_weather
-from planner import explain, ranking, routing, rules, sampling, weather
+from planner import explain, later, ranking, routing, rules, sampling, weather
 from planner.http import Deadline
 from planner.sampling import LonLat
 
@@ -146,11 +146,30 @@ def score(
         source = {"model": "demo", "source": DEMO_SOURCE}
     else:
         source = {"model": weather.MODEL, "source": "Open-Meteo (CC BY 4.0)"}
+    rec = ranking.recommend(summaries)
+    best = shapes[rec.index]
+    waiting = later.leave_later(
+        best.checkpoints, best.duration_s, grid, trip.load_lb, trip.departure, summaries[rec.index]
+    )
     return {
         "routes": routes_out,
-        "recommendation": explain.explain(ranking.recommend(summaries), facts, tz),
+        "recommendation": {**explain.explain(rec, facts, tz), "leave_later": _leave_later_json(waiting)},
         "weather": {**source, "grid_step_deg": grid.step, "locations": len(grid.series)},
         "heatmap": encode_heatmap(grid, trip.load_lb),
+    }
+
+
+def _leave_later_json(w: later.LaterDeparture | None) -> dict[str, Any] | None:
+    """The smallest later departure that improves the recommended route; null when none does."""
+    if w is None:
+        return None
+    return {
+        "shift_h": w.shift_h,
+        "departure_utc": _iso(w.departure),
+        "no_travel_mi": round(w.summary.no_travel_mi, 1),
+        "severe_mi": round(w.summary.severe_mi, 1),
+        "high_mi": round(w.summary.high_mi, 1),
+        "max_level": _level(w.summary.max_level),
     }
 
 

@@ -72,6 +72,19 @@ const Plan = z
       reason: z.string(),
       why_not: z.array(z.object({ route_id: z.number(), text: z.string(), hazard: z.string().nullable() })),
       close_call: z.boolean(),
+      // The smallest later departure that improves the recommended route; null when none does.
+      // Absent on older saved plans.
+      leave_later: z
+        .object({
+          shift_h: z.number(),
+          departure_utc: z.string(),
+          no_travel_mi: z.number(),
+          severe_mi: z.number(),
+          high_mi: z.number(),
+          max_level: Level,
+        })
+        .nullable()
+        .optional(),
     }),
     weather: z.object({
       model: z.string(),

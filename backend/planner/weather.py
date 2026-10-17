@@ -185,6 +185,11 @@ class Grid:
     start: datetime  # hour 0 is the departure itself
     series: dict[int, Series]  # fetched nodes only
 
+    def end(self) -> datetime:
+        """The last stamp every fetched series reaches; reads past it would only repeat that hour."""
+        ends = [s.t0 + 3600 * (len(s.wind_mph) - 1) for s in self.series.values()]
+        return datetime.fromtimestamp(min(ends), tz=UTC) if ends else self.start
+
     def at(self, lon: float, lat: float, when: datetime) -> Weather:
         """Bilinear in space between the four nodes around (lon, lat), linear in time."""
         x = (lon - self.west) / self.step

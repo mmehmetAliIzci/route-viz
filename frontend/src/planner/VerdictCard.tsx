@@ -1,4 +1,4 @@
-import { ChevronUp, TriangleAlert } from 'lucide-react'
+import { ChevronUp, Clock, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PlanView } from './model/planView'
 
@@ -56,6 +56,15 @@ export function VerdictCard({ plan, onShowOnMap, onSelect, selected = true, mapR
         >
           <TriangleAlert className="mt-0.5 size-5 shrink-0" aria-hidden />
           <span className="min-w-0">{verdict.tradeoff}</span>
+        </p>
+      )}
+      {verdict.leaveLater && (
+        <p
+          role="status"
+          className="flex items-start gap-2 rounded-xl bg-white/15 px-3 py-2.5 text-sm font-medium break-words"
+        >
+          <Clock className="mt-0.5 size-5 shrink-0" aria-hidden />
+          <span className="min-w-0">{verdict.leaveLater}</span>
         </p>
       )}
       {onSelect && !selected && mapRouteName && <p className="text-sm">Map shows {mapRouteName}</p>}
