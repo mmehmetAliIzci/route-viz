@@ -99,7 +99,10 @@ The screenshots below are the real app, on the saved Kansas City to Denver trip 
 
 The green card answers three questions at a glance: **which road**, **when you arrive**, and **the worst thing on the way**. Here: take I-70 W / I-670 W, arrive at 12:09 AM, and expect No Travel wind for the last 67 miles into Denver. The small print explains the choice: it has the least No Travel weather of the three routes, and with a 38,000 lb load, wind over 45 mph counts as No Travel.
 
-If another road is at least an hour faster, the card adds a red note saying how much time it would save and how much extra bad weather it would cost.
+Two notes can appear under the answer:
+
+- **A faster road.** If another road is at least an hour faster, a red note says how much time it would save and how much extra bad weather it would cost.
+- **Leaving later.** If waiting would avoid some of the bad weather, a clock note suggests the smallest delay, in the form *Leave 6 h later, at 9:00 AM: no No Travel weather (now 67 mi).* More on this under "How the best route is picked".
 """)
 P(columns("phone-shots", [
     ("The answer card", image("verdict-card.jpg", "Phone: the recommendation card")),
@@ -242,6 +245,7 @@ P("""
 On the real forecast for the same day the weather was calm on all three routes. Every weather question tied, so the drive time decided: *Same weather, 1 h 21 min faster.*
 
 **The trade-off note.** The order puts bad weather before time, so a route can win while being hours slower. When another road is at least an hour faster, the card says so in red, with the time saved and the extra bad weather, so the driver can make an informed choice.
+
 """)
 P("""
 ### What "average risk" means
@@ -260,6 +264,14 @@ P(annotated("ranking-code", "backend/planner/ranking.py", lines("backend/planner
     {"lines": "1-9", "label": "The questions, in order", "note": "No Travel first, then the brief's order. Numbers are rounded so tiny differences never decide."},
     {"lines": "25-29", "label": "What decided", "note": "The first question where the winner and runner-up differ. It becomes the reason on the card."},
 ]))
+P("""
+### Leaving later
+
+The rules treat No Travel as "do not drive through it", but a driver can also wait. So when the recommended route still meets High weather or worse, the app checks whether leaving **3, 6, 12 or 24 hours later** would help, and suggests the smallest delay that cuts the No Travel, Severe or High miles.
+
+This costs nothing extra. The forecast grid already covers 48 hours, and every checkpoint keeps its distance and travel time from the start, so only the clock moves: each checkpoint is simply read again at its later ETA. No new weather request is made. Delays the forecast does not reach are skipped, and if no delay helps, the card shows nothing.
+
+""")
 
 # ---------- Limits ----------
 P("""
@@ -342,7 +354,7 @@ entities = [
     {"id": "recommendation", "name": "Recommendation", "fields": [
         {"name": "route_id", "type": "number", "fk": "Route.id"}, {"name": "runner_up_id", "type": "number", "fk": "Route.id", "nullable": True},
         {"name": "decided_by", "type": "question", "nullable": True}, {"name": "headline, reason", "type": "string"},
-        {"name": "why_not", "type": "per other route"}]},
+        {"name": "why_not", "type": "per other route"}, {"name": "leave_later", "type": "later departure", "nullable": True}]},
     {"id": "heatmap", "name": "Heatmap", "fields": [
         {"name": "west, south, step_deg, nx, ny", "type": "number"}, {"name": "hours", "type": "49"},
         {"name": "mask", "type": "base64"}, {"name": "channels", "type": "risk, wind, rain, snow, wind_dir"}]},
@@ -381,6 +393,7 @@ tree = [
     {"path": "backend/planner/rules.py", "note": "Risk levels and load rules from the brief"},
     {"path": "backend/planner/ranking.py", "note": "Route summaries and the tie-breaker order"},
     {"path": "backend/planner/explain.py", "note": "The plain-language sentences"},
+    {"path": "backend/planner/later.py", "note": "Would leaving later help? The route re-scored at later departures"},
     {"path": "backend/data/samples/", "note": "Two recorded real trips"},
     {"path": "backend/tests/", "note": "Backend tests, on recorded TomTom and Open-Meteo answers"},
     {"path": "frontend/src/api/planApi.ts", "note": "Calls the backend and checks every answer"},
@@ -398,6 +411,7 @@ P(table("decisions", ["Decision", "Why"], [
     ["One lean weather grid around the routes", "About 150 to 200 points per trip keeps the free weather service usable."],
     ["Colour only the dangerous stretches", "Clear road draws nothing extra, so the map stays readable."],
     ["Map first on the phone, route running up the screen", "The map is the product; panels stay small and out of the way."],
+    ["Suggest leaving later, using the forecast already fetched", "Waiting is often the real answer to No Travel weather, and checking it needs no extra weather request."],
     ["Demo weather, clearly labelled", "Every risk level can be shown on any day without pretending it is a forecast."],
     ["Times in the viewer's own zone", "Departure, arrival and hazard times match the clock of the person reading them."],
 ]))
@@ -409,12 +423,9 @@ P("""
 
 These came up while building the app. They are thought through but deliberately left out of this version.
 
-### Waiting out No Travel weather
+### Stopping partway
 
-The rules treat No Travel as "do not drive through it". In real life a driver can also **wait**: park at a truck stop until the wind drops. Two ways the app could help:
-
-- **Leave later.** Re-score the recommended route as if the truck left 3, 6, 12 or 24 hours later, and suggest the smallest delay that avoids the worst weather. This is cheap: the forecast grid already covers 48 hours and every checkpoint keeps its travel time from the start, so only the clock moves and no new weather request is needed.
-- **Stop partway.** Drive to the last checkpoint before the bad stretch, wait there, then continue: every later ETA moves back by the wait. US truck drivers must also take a 10-hour break after 11 hours of driving, so a real version would line waits up with those required breaks.
+"Leaving later" only moves the departure. A driver can also stop on the way: drive to the last checkpoint before the bad stretch, wait at a truck stop there, then continue. The same grid could score that, since every later ETA simply moves back by the length of the wait. US truck drivers must also take a 10-hour break after 11 hours of driving, so a real version would line waits up with those required breaks instead of suggesting stops a driver cannot legally make.
 
 ### A weighted score instead of a fixed order
 
