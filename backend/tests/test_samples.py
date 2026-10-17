@@ -13,15 +13,23 @@ FRONTEND_FIXTURE = Path(__file__).resolve().parents[2] / "frontend" / "src" / "t
 PATHS = [*sorted(samples.SAMPLES_DIR.glob("*.json")), FRONTEND_FIXTURE]
 
 
-def test_saved_kansas_city_denver_is_a_close_call() -> None:
-    rec = samples.get("kansas-city-denver")["recommendation"]
-    assert rec["route_id"] == 1
-    assert rec["decided_by"] == "avg_risk"
-    assert rec["close_call"] is True
-    assert rec["reason"] == (
-        "Same weather as I-70 W / I-470 W. I-80 W / I-76 W scores slightly lower "
-        "only because it is longer. I-70 W / I-470 W is 1 h 14 min faster."
-    )
+@pytest.mark.parametrize(
+    ("sample_id", "reason"),
+    [
+        ("kansas-city-denver", "Same weather, 1 h 21 min faster."),
+        ("chicago-nashville", "Same weather, 42 min faster."),
+    ],
+)
+def test_saved_trips_were_recorded_in_clear_weather_with_wind_direction(sample_id: str, reason: str) -> None:
+    """Recorded 2026-10-17: both trips saw only low risk, so the faster route wins outright."""
+    body = samples.get(sample_id)
+    rec = body["recommendation"]
+    assert rec["route_id"] == 0
+    assert rec["decided_by"] == "duration"
+    assert rec["close_call"] is False
+    assert rec["reason"] == reason
+    assert "wind_dir" in body["heatmap"]["channels"]
+    assert all("wind_dir_deg" in c for r in body["routes"] for c in r["checkpoints"])
 
 
 @pytest.mark.parametrize("path", PATHS, ids=lambda p: Path(p).stem)
@@ -39,7 +47,17 @@ def test_a_saved_plan_can_be_explained_in_another_zone() -> None:
     assert denver["trip"]["viewer_tz"] == "America/Denver"
     assert samples.in_zone(stored, None)["trip"]["viewer_tz"] == stored["trip"]["origin_tz"]
     assert samples.in_zone(stored, None)["recommendation"] == stored["recommendation"]
-    assert denver["recommendation"] != stored["recommendation"]
+    # The recording is clear weather, so its text carries no clock time. Give the runner-up
+    # one moderate hazard: the hour in its "why not" line must then follow the zone.
+    rainy = deepcopy(stored)
+    runner_up = rainy["routes"][stored["recommendation"]["runner_up_id"]]
+    runner_up["checkpoints"][5] |= {"level": "moderate", "cause": "rain"}
+    chicago = samples.in_zone(rainy, None)["recommendation"]
+    denver = samples.in_zone(rainy, "America/Denver")["recommendation"]
+    assert chicago["route_id"] == denver["route_id"] == stored["recommendation"]["route_id"]
+    hazards = [[w["hazard"] for w in rec["why_not"]] for rec in (chicago, denver)]
+    assert all("Moderate rain at mile 125 around " in (h[0] or "") for h in hazards)
+    assert hazards[0] != hazards[1]
 
 
 def test_unknown_zone_is_rejected() -> None:

@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")  # the provider cache needs settings
 from planner import plan, samples  # noqa: E402
+from planner.http import Deadline  # noqa: E402
+
+BUDGET_S = 180  # a recording may take longer than the API's plan budget
 
 TRIPS = [
     (
@@ -38,7 +41,7 @@ def main() -> None:
     samples.SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     for sample_id, origin, destination in TRIPS:
         trip = plan.Trip(origin, destination, departure, load_lb=38_000, spacing_mi=25)
-        body = plan.build(trip, key)
+        body = plan.build(trip, key, deadline=Deadline.after(BUDGET_S))
         body["sample"] = {
             "id": sample_id,
             "label": f"{origin.label} to {destination.label}",
