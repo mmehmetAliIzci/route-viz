@@ -1,7 +1,7 @@
 import { CanvasSource, GeoJSONSource, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { paintHour, type HeatmapField, type HeatmapKind } from '../model/heatmap'
+import { HEATMAP_UPSAMPLE, paintHour, type HeatmapField, type HeatmapKind } from '../model/heatmap'
 import type { PlanView } from '../model/planView'
 import type { ResolvedTheme } from '../../theme/theme'
 import { addRouteLayers, checkpointsGeoJson, ROUTES_CASING_LAYER, routesGeoJson } from './routeLayers'
@@ -126,7 +126,7 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
     if (!heatmap) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const image = ctx.createImageData(field.nx, field.ny)
+    const image = ctx.createImageData(field.nx * HEATMAP_UPSAMPLE, field.ny * HEATMAP_UPSAMPLE)
     paintHour(field, heatmap.kind, heatmap.hour, image.data)
     ctx.putImageData(image, 0, 0)
     const src = map.getSource(HEATMAP_SOURCE)
@@ -139,15 +139,16 @@ export function useMapLibre({ plan, selectedId, onSelectRoute, heatmap, fitPaddi
   return { container, map }
 }
 
-// One small canvas per plan, placed over the corridor and drawn under the routes.
+// One canvas per plan, HEATMAP_UPSAMPLE pixels per grid cell, placed over the corridor and drawn
+// under the routes.
 // Declared before the paint effect, so the canvas exists when that effect runs.
 function useHeatmapCanvas(map: MapLibreMap | null, field: HeatmapField | null) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   useEffect(() => {
     if (!map || !field) return
     const c = document.createElement('canvas')
-    c.width = field.nx
-    c.height = field.ny
+    c.width = field.nx * HEATMAP_UPSAMPLE
+    c.height = field.ny * HEATMAP_UPSAMPLE
     map.addSource(HEATMAP_SOURCE, { type: 'canvas', canvas: c, coordinates: field.corners, animate: false })
     map.addLayer(
       {

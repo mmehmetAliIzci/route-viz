@@ -4,8 +4,11 @@ import type { HeatmapField } from '../model/heatmap'
 import type { ResolvedTheme } from '../../theme/theme'
 import { useMediaQuery } from '../useMediaQuery'
 import {
+  budgetedCount,
+  createFrameBudget,
   createParticles,
   particleCount,
+  recordFrame,
   seededRandom,
   setParticleCount,
   stepParticles,
@@ -63,12 +66,15 @@ export function useWindParticles(
     const project = projector(map)
     const unproject = unprojector(map)
     const state = createParticles(field, particleCount(surface.width, surface.height), Math.random, visibleArea(map))
+    const budget = createFrameBudget() // a new field or a reseed starts at the full count again
     let last = performance.now()
     let frame = requestAnimationFrame(function tick(now) {
-      const view: MapView = { project, unproject, area: visibleArea(map) }
-      setParticleCount(state, field, particleCount(surface.width, surface.height), view.area)
-      stepParticles(state, field, hourRef.current, view, (now - last) / 1000)
+      const dtMs = now - last
       last = now
+      recordFrame(budget, dtMs)
+      const view: MapView = { project, unproject, area: visibleArea(map) }
+      setParticleCount(state, field, budgetedCount(budget, surface.width, surface.height), view.area)
+      stepParticles(state, field, hourRef.current, view, dtMs / 1000)
       drawTrails(surface, state, project, colorRef.current)
       frame = requestAnimationFrame(tick)
     })
@@ -87,6 +93,7 @@ export function useWindParticles(
     const unproject = unprojector(map)
     let state: WindParticles | null = null
     let surface: Surface | null = null
+    // The still frame is drawn once, not per frame, so there is no frame time to budget against.
     const reseed = () => {
       if (!surface) return
       const area = visibleArea(map)

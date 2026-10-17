@@ -1,10 +1,15 @@
 import type { Plan } from '../../api/planApi'
 import { LEVELS } from './planView'
 
-// The corridor heatmap: decoded once per plan, painted into a tiny canvas per hour.
-// Each node becomes one pixel; MapLibre stretches the canvas over the corridor with
-// linear filtering, which gives the smooth look. Hour may be fractional: the two
-// neighbouring hours are blended so the slider moves continuously.
+// The corridor heatmap: decoded once per plan, painted into a canvas per hour.
+// The canvas holds HEATMAP_UPSAMPLE pixels per grid cell on each axis, and MapLibre
+// stretches it over the corridor with linear filtering. Each pixel is bilinearly
+// interpolated from the four surrounding nodes. Absent nodes (no forecast) are not
+// colours: they only shape coverage, and the colour is the mean of the present nodes.
+// Coverage is turned into alpha with a smoothstep around the half-cell line, so the
+// corridor edge is a soft curve instead of a blurred staircase of node-sized squares.
+// Hour may be fractional: the two neighbouring hours are blended so the slider moves
+// continuously.
 
 export const HEATMAP_KINDS = ['risk', 'wind', 'rain', 'snow'] as const
 export type HeatmapKind = (typeof HEATMAP_KINDS)[number]
@@ -167,29 +172,86 @@ export function sampleWind(field: HeatmapField, hour: number, lon: number, lat: 
   return { u: at(windVectors.u), v: at(windVectors.v) }
 }
 
-// Writes one RGBA pixel per node into `out` (length nx * ny * 4), north row first.
-// Nodes without a forecast are transparent, so the corridor fades out at its edges.
-export function paintHour(field: HeatmapField, kind: HeatmapKind, hour: number, out: Uint8ClampedArray): void {
-  const { nx, ny, hours } = field
+export const HEATMAP_UPSAMPLE = 8
+
+// Where each output pixel along one axis falls in node units: the two surrounding
+// nodes and the weight of the upper one. Pixel centres sit at (o + 0.5) / scale - 0.5,
+// clamped to the grid so the outer half-cell extends the edge nodes.
+type Axis = { lo: Int32Array; hi: Int32Array; t: Float32Array }
+
+function axisSamples(nodes: number, scale: number): Axis {
+  const size = nodes * scale
+  const axis: Axis = { lo: new Int32Array(size), hi: new Int32Array(size), t: new Float32Array(size) }
+  for (let o = 0; o < size; o++) {
+    const p = Math.min(Math.max((o + 0.5) / scale - 0.5, 0), nodes - 1)
+    const lo = Math.floor(p)
+    axis.lo[o] = lo
+    axis.hi[o] = Math.min(lo + 1, nodes - 1)
+    axis.t[o] = p - lo
+  }
+  return axis
+}
+
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1)
+  return t * t * (3 - 2 * t)
+}
+
+// Writes the heatmap for one hour into `out` (length nx * scale * ny * scale * 4), north
+// row first. Value is the mean of the surrounding present nodes, weighted bilinearly;
+// alpha is the ramp alpha times a smoothstep of how much of the pixel's neighbourhood
+// has a forecast, so the corridor fades out at its edge.
+export function paintHour(
+  field: HeatmapField,
+  kind: HeatmapKind,
+  hour: number,
+  out: Uint8ClampedArray,
+  scale = HEATMAP_UPSAMPLE,
+): void {
+  const { nx, ny, hours, present } = field
   const h = Math.min(Math.max(hour, 0), hours - 1)
   const h0 = Math.floor(h)
   const h1 = Math.min(h0 + 1, hours - 1)
   const f = h - h0
   const n = nx * ny
-  const values = field.values[kind]
+  const source = field.values[kind]
+  const node = new Float32Array(n) // the hour-blended value of every node
+  for (let k = 0; k < n; k++) node[k] = (source[h0 * n + k] ?? 0) * (1 - f) + (source[h1 * n + k] ?? 0) * f
+
   const ramp = RAMPS[kind]
-  for (let j = 0; j < ny; j++) {
-    const row = ny - 1 - j // canvas row 0 is the north edge
-    for (let i = 0; i < nx; i++) {
-      const k = j * nx + i
-      const v = (values[h0 * n + k] ?? 0) * (1 - f) + (values[h1 * n + k] ?? 0) * f
-      const [r, g, b, a] = colorAt(ramp, v)
-      const off = field.present[k] !== 1
-      const p = (row * nx + i) * 4
+  const cols = axisSamples(nx, scale)
+  const rows = axisSamples(ny, scale)
+  const width = nx * scale
+  const height = ny * scale
+  for (let row = 0; row < height; row++) {
+    const o = height - 1 - row // canvas row 0 is the north edge
+    const base0 = (rows.lo[o] ?? 0) * nx
+    const base1 = (rows.hi[o] ?? 0) * nx
+    const ty = rows.t[o] ?? 0
+    for (let col = 0; col < width; col++) {
+      const i0 = cols.lo[col] ?? 0
+      const i1 = cols.hi[col] ?? 0
+      const tx = cols.t[col] ?? 0
+      const k00 = base0 + i0
+      const k10 = base0 + i1
+      const k01 = base1 + i0
+      const k11 = base1 + i1
+      // bilinear weights, zeroed for nodes without a forecast
+      const w00 = present[k00] === 1 ? (1 - tx) * (1 - ty) : 0
+      const w10 = present[k10] === 1 ? tx * (1 - ty) : 0
+      const w01 = present[k01] === 1 ? (1 - tx) * ty : 0
+      const w11 = present[k11] === 1 ? tx * ty : 0
+      const coverage = w00 + w10 + w01 + w11
+      const value =
+        coverage > 0
+          ? (w00 * (node[k00] ?? 0) + w10 * (node[k10] ?? 0) + w01 * (node[k01] ?? 0) + w11 * (node[k11] ?? 0)) / coverage
+          : 0
+      const [r, g, b, a] = colorAt(ramp, value)
+      const p = (row * width + col) * 4
       out[p] = r
       out[p + 1] = g
       out[p + 2] = b
-      out[p + 3] = off ? 0 : a
+      out[p + 3] = Math.round(a * smoothstep(0.35, 0.65, coverage))
     }
   }
 }

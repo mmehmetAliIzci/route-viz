@@ -13,6 +13,11 @@ export const MIN_SPEED_MPH = 1 // slower than this barely moves on screen, so re
 export const MAX_STEP_S = 0.05 // a long frame (tab switch, GC pause) must not fling particles
 export const CSS_PX_PER_PARTICLE = 2600 // fewer, longer streaks read as flow rather than dust
 export const MAX_PARTICLES = 1500
+export const SLOW_FRAME_MS = 25 // slower than 40 fps
+export const SLOW_FRAMES_TO_HALVE = 30 // a sustained run, not one GC pause
+export const MIN_PARTICLES = 100 // fewer than this stops looking like wind
+// Smallest power of two that takes even the largest map below MIN_PARTICLES: past it, doubling changes nothing.
+const MAX_DIVISOR = 16
 
 export type Project = (lon: number, lat: number) => [x: number, y: number]
 export type Unproject = (x: number, y: number) => [lon: number, lat: number]
@@ -38,6 +43,33 @@ export type WindParticles = {
 // One particle for every CSS_PX_PER_PARTICLE square CSS pixels of map, capped.
 export function particleCount(widthPx: number, heightPx: number): number {
   return Math.min(MAX_PARTICLES, Math.max(0, Math.round((widthPx * heightPx) / CSS_PX_PER_PARTICLE)))
+}
+
+// Frame-budget state for one animation run. The target particle count is divided by `divisor`,
+// which only grows: every SLOW_FRAMES_TO_HALVE slow frames in a row double it.
+export type FrameBudget = { slowFrames: number; divisor: number }
+
+export function createFrameBudget(): FrameBudget {
+  return { slowFrames: 0, divisor: 1 }
+}
+
+// Records one frame's duration. Updates `budget` in place so the animation loop allocates nothing.
+export function recordFrame(budget: FrameBudget, dtMs: number): void {
+  if (!(dtMs > SLOW_FRAME_MS)) {
+    budget.slowFrames = 0
+    return
+  }
+  budget.slowFrames += 1
+  if (budget.slowFrames < SLOW_FRAMES_TO_HALVE) return
+  budget.slowFrames = 0
+  if (budget.divisor < MAX_DIVISOR) budget.divisor *= 2
+}
+
+// The particle count to run with: the map's own count shrunk by the budget, never below
+// MIN_PARTICLES and never above the map's own count (a tiny map keeps what it has).
+export function budgetedCount(budget: FrameBudget, widthPx: number, heightPx: number): number {
+  const full = particleCount(widthPx, heightPx)
+  return Math.min(full, Math.max(MIN_PARTICLES, Math.floor(full / budget.divisor)))
 }
 
 export function createParticles(

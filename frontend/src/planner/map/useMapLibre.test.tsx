@@ -2,7 +2,7 @@ import { act, render } from '@testing-library/react'
 import { useEffect } from 'react'
 import fixture from '../../test/plan-kc-den.json'
 import { parsePlan } from '../../api/planApi'
-import { decodeHeatmap } from '../model/heatmap'
+import { decodeHeatmap, HEATMAP_UPSAMPLE } from '../model/heatmap'
 import { buildPlanView } from '../model/planView'
 import type { StyleSpecification, StyleSwapOptions } from 'maplibre-gl'
 import type { ResolvedTheme } from '../../theme/theme'
@@ -89,7 +89,10 @@ const theMap = () => fake.state.maps[0] as InstanceType<typeof fake.FakeMap>
 const sourceAt = (id: string) => fake.state.sources.get(id) as InstanceType<typeof fake.GeoJSONSource>
 const loadMap = () => act(() => fake.state.handlers.get('load')?.())
 
+const createImageData = vi.fn((w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }))
+
 beforeEach(() => {
+  createImageData.mockClear()
   fake.calls.length = 0
   fake.state.maps.length = 0
   fake.state.sources.clear()
@@ -97,7 +100,7 @@ beforeEach(() => {
   fake.state.handlers.clear()
   // jsdom has no canvas; the paint effect only needs these two calls.
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    createImageData,
     putImageData: () => {},
   } as unknown as CanvasRenderingContext2D)
 })
@@ -170,6 +173,12 @@ describe('useMapLibre', () => {
     expect(fake.calls).toContain('removeLayer:heatmap')
     expect(fake.calls).toContain('removeSource:heatmap')
     expect(fake.state.sources.has('heatmap')).toBe(false)
+  })
+
+  it('paints the heatmap at HEATMAP_UPSAMPLE pixels per grid cell', async () => {
+    render(<Harness plan={view} selectedId={0} heatmap={{ field, kind: 'risk', hour: 0 }} />)
+    await loadMap()
+    expect(createImageData).toHaveBeenCalledWith(field.nx * HEATMAP_UPSAMPLE, field.ny * HEATMAP_UPSAMPLE)
   })
 
   it('replaces the heatmap source when a new field arrives', async () => {

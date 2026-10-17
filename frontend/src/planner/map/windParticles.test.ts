@@ -1,8 +1,14 @@
 import type { Plan } from '../../api/planApi'
 import { decodeHeatmap } from '../model/heatmap'
 import {
+  budgetedCount,
+  createFrameBudget,
   createParticles,
   MAX_PARTICLES,
+  MIN_PARTICLES,
+  recordFrame,
+  SLOW_FRAME_MS,
+  SLOW_FRAMES_TO_HALVE,
   CSS_PX_PER_PARTICLE,
   MAX_STEP_S,
   particleCount,
@@ -185,5 +191,63 @@ describe('particle count', () => {
     setParticleCount(state, field, 5, null)
     expect(state.particles).toHaveLength(5)
     expect(state.particles[0]).toBe(first)
+  })
+})
+
+describe('frame budget', () => {
+  const SLOW = SLOW_FRAME_MS + 5
+  const FAST = 16
+  const slowFrames = (budget: ReturnType<typeof createFrameBudget>, n: number) => {
+    for (let f = 0; f < n; f++) recordFrame(budget, SLOW)
+  }
+
+  it('starts at the full count', () => {
+    expect(budgetedCount(createFrameBudget(), 1200, 1000)).toBe(particleCount(1200, 1000))
+  })
+
+  it('halves the target after 30 slow frames, and not again until another 30', () => {
+    const budget = createFrameBudget()
+    const full = particleCount(1200, 1000)
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE - 1)
+    expect(budgetedCount(budget, 1200, 1000)).toBe(full)
+    slowFrames(budget, 1)
+    expect(budgetedCount(budget, 1200, 1000)).toBe(Math.floor(full / 2))
+    slowFrames(budget, 1) // the 31st
+    expect(budgetedCount(budget, 1200, 1000)).toBe(Math.floor(full / 2))
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE - 2)
+    expect(budgetedCount(budget, 1200, 1000)).toBe(Math.floor(full / 2))
+    slowFrames(budget, 1)
+    expect(budgetedCount(budget, 1200, 1000)).toBe(Math.floor(full / 4))
+  })
+
+  it('treats exactly the slow threshold as fast', () => {
+    const budget = createFrameBudget()
+    for (let f = 0; f < SLOW_FRAMES_TO_HALVE * 2; f++) recordFrame(budget, SLOW_FRAME_MS)
+    expect(budget.divisor).toBe(1)
+  })
+
+  it('restarts the streak on a fast frame', () => {
+    const budget = createFrameBudget()
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE - 1)
+    recordFrame(budget, FAST)
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE - 1)
+    expect(budget.divisor).toBe(1)
+    slowFrames(budget, 1)
+    expect(budget.divisor).toBe(2)
+  })
+
+  it('never drops below the minimum while the map wants more', () => {
+    const budget = createFrameBudget()
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE * 40)
+    expect(budgetedCount(budget, 4000, 3000)).toBe(MIN_PARTICLES)
+    expect(budgetedCount(budget, 400, 700)).toBe(MIN_PARTICLES) // 108 particles wanted
+  })
+
+  it('leaves a map that wants fewer than the minimum unchanged', () => {
+    const budget = createFrameBudget()
+    slowFrames(budget, SLOW_FRAMES_TO_HALVE * 5)
+    expect(particleCount(300, 400)).toBeLessThan(MIN_PARTICLES)
+    expect(budgetedCount(budget, 300, 400)).toBe(particleCount(300, 400))
+    expect(budgetedCount(budget, 0, 600)).toBe(0)
   })
 })
